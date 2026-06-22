@@ -122,6 +122,9 @@ func normalizeConfig(config *Config) {
 	if config.Browser.Cores == nil {
 		config.Browser.Cores = []BrowserCore{}
 	}
+	for i := range config.Browser.Cores {
+		config.Browser.Cores[i].CoreType = normalizeBrowserCoreType(config.Browser.Cores[i].CoreType)
+	}
 	if config.Browser.Proxies == nil {
 		config.Browser.Proxies = []BrowserProxy{}
 	}
@@ -310,5 +313,14 @@ func normalizeAutomationNodeSource(value string) string {
 		return AutomationNodeSourceBundled
 	default:
 		return AutomationNodeSourceAuto
+	}
+}
+
+func normalizeBrowserCoreType(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "camoufox":
+		return "camoufox"
+	default:
+		return "chromium"
 	}
 }

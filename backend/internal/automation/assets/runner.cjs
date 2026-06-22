@@ -61,28 +61,67 @@ function normalizeEndpointCandidate(value) {
   }
 }
 
-function buildConnectEndpoints(payload, session) {
+function pushUniqueEndpoint(candidates, seen, value) {
+  const endpoint = normalizeEndpointCandidate(value);
+  if (!endpoint || seen.has(endpoint)) {
+    return;
+  }
+  seen.add(endpoint);
+  candidates.push(endpoint);
+}
+
+function buildCDPEndpoints(payload, session) {
   const candidates = [];
   const seen = new Set();
-
-  const pushCandidate = (value) => {
-    const endpoint = normalizeEndpointCandidate(value);
-    if (!endpoint || seen.has(endpoint)) {
-      return;
-    }
-    seen.add(endpoint);
-    candidates.push(endpoint);
-  };
-
-  pushCandidate(session && session.cdpUrl);
-
+  pushUniqueEndpoint(candidates, seen, session && session.cdpUrl);
   const debugPort = Number(session && session.debugPort);
   if (Number.isFinite(debugPort) && debugPort > 0) {
-    pushCandidate(`http://127.0.0.1:${Math.round(debugPort)}`);
+    pushUniqueEndpoint(candidates, seen, `http://127.0.0.1:${Math.round(debugPort)}`);
   }
-
-  pushCandidate(payload && payload.launchBaseUrl);
+  pushUniqueEndpoint(candidates, seen, payload && payload.launchBaseUrl);
   return candidates;
+}
+
+function normalizePlaywrightEndpointCandidate(value) {
+  const normalized = String(value || '').trim();
+  if (!normalized) {
+    return '';
+  }
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+      return '';
+    }
+    if (parsed.port === '0') {
+      return '';
+    }
+    return parsed.toString();
+  } catch {
+    return '';
+  }
+}
+
+function pushUniquePlaywrightEndpoint(candidates, seen, value) {
+  const endpoint = normalizePlaywrightEndpointCandidate(value);
+  if (!endpoint || seen.has(endpoint)) {
+    return;
+  }
+  seen.add(endpoint);
+  candidates.push(endpoint);
+}
+
+function buildPlaywrightEndpoints(_payload, session) {
+  const candidates = [];
+  const seen = new Set();
+  pushUniquePlaywrightEndpoint(candidates, seen, session && session.playwrightWsEndpoint);
+  pushUniquePlaywrightEndpoint(candidates, seen, session && session.playwrightEndpoint);
+  pushUniquePlaywrightEndpoint(candidates, seen, session && session.runtimeEndpoint);
+  return candidates;
+}
+
+function sessionRuntimeProtocol(session) {
+  const protocol = String((session && session.runtimeProtocol) || '').trim().toLowerCase();
+  return protocol === 'playwright' ? 'playwright' : 'cdp';
 }
 
 function normalizePathUnderRoot(rootDir, targetName) {
@@ -304,7 +343,7 @@ async function loadScriptModule(scriptPath) {
   throw new Error('script must export run()');
 }
 
-async function runScriptTask(payload, chromium) {
+async function runScriptTask(payload, playwright) {
   const scriptModule = await loadScriptModule(payload.scriptPath);
   if (!scriptModule || typeof scriptModule.run !== 'function') {
     throw new Error('script must export run()');
@@ -358,8 +397,11 @@ async function runScriptTask(payload, chromium) {
     return response.body;
   };
 
-  const connect = async (session = {}) => {
-    const endpoints = buildConnectEndpoints(payload, session);
+  const connectCDP = async (session = {}) => {
+    if (!playwright || !playwright.chromium || typeof playwright.chromium.connectOverCDP !== 'function') {
+      throw new Error('当前 Playwright runtime 缺少 chromium.connectOverCDP 能力，无法通过 CDP 接管浏览器；请检查自动化运行时是否完整安装 chromium 浏览器');
+    }
+    const endpoints = buildCDPEndpoints(payload, session);
     if (endpoints.length === 0) {
       throw new Error(
         `launch session does not contain a valid cdp endpoint (cdpUrl=${String(
@@ -370,16 +412,50 @@ async function runScriptTask(payload, chromium) {
 
     const deadline = Date.now() + timeout;
     let lastError = null;
-
     while (Date.now() <= deadline) {
       for (const endpoint of endpoints) {
         const remaining = deadline - Date.now();
-        if (remaining <= 0) {
-          break;
-        }
-
+        if (remaining <= 0) break;
         try {
-          const browser = await chromium.connectOverCDP(endpoint, {
+          const browser = await playwright.chromium.connectOverCDP(endpoint, {
+            timeout: Math.max(1000, Math.min(remaining, timeout)),
+          });
+          connectedBrowsers.add(browser);
+          const context = browser.contexts()[0] || null;
+          const page = context && context.pages().length > 0 ? context.pages()[0] : null;
+          return { browser, context, page, session: { ...session, cdpUrl: endpoint, runtimeProtocol: 'cdp', runtimeEndpoint: endpoint } };
+        } catch (error) {
+          lastError = error;
+        }
+      }
+      if (Date.now() >= deadline) break;
+      await sleep(Math.min(500, Math.max(100, deadline - Date.now())));
+    }
+    const lastMessage = lastError && lastError.message ? lastError.message : String(lastError || 'unknown error');
+    throw new Error(`cdp endpoint is not ready after ${timeout} ms (endpoints: ${endpoints.join(', ')}): ${lastMessage}`);
+  };
+
+  const connectPlaywright = async (session = {}) => {
+    if (!playwright || !playwright.firefox || typeof playwright.firefox.connect !== 'function') {
+      throw new Error('当前 Playwright runtime 缺少 firefox.connect 能力，无法接管 Camoufox/Playwright 实例；请确认自动化运行时已安装 firefox 浏览器或切换为 CDP 协议脚本');
+    }
+    const endpoints = buildPlaywrightEndpoints(payload, session);
+    if (endpoints.length === 0) {
+      throw new Error(
+        `launch session does not contain a valid playwright endpoint (runtimeEndpoint=${String(
+          session && session.runtimeEndpoint ? session.runtimeEndpoint : ''
+        )}, playwrightEndpoint=${String(session && session.playwrightEndpoint ? session.playwrightEndpoint : '')})`
+      );
+    }
+
+    const deadline = Date.now() + timeout;
+    let lastError = null;
+    while (Date.now() <= deadline) {
+      for (const endpoint of endpoints) {
+        const remaining = deadline - Date.now();
+        if (remaining <= 0) break;
+        try {
+          const browser = await playwright.firefox.connect(endpoint, {
             timeout: Math.max(1000, Math.min(remaining, timeout)),
           });
           connectedBrowsers.add(browser);
@@ -391,32 +467,38 @@ async function runScriptTask(payload, chromium) {
             page,
             session: {
               ...session,
-              cdpUrl: endpoint,
+              runtimeProtocol: 'playwright',
+              runtimeEndpoint: endpoint,
+              playwrightEndpoint: endpoint,
+              playwrightWsEndpoint: endpoint,
             },
           };
         } catch (error) {
           lastError = error;
         }
       }
-
-      if (Date.now() >= deadline) {
-        break;
-      }
-
+      if (Date.now() >= deadline) break;
       await sleep(Math.min(500, Math.max(100, deadline - Date.now())));
     }
+    const lastMessage = lastError && lastError.message ? lastError.message : String(lastError || 'unknown error');
+    throw new Error(`playwright endpoint is not ready after ${timeout} ms (endpoints: ${endpoints.join(', ')}): ${lastMessage}`);
+  };
 
-    const lastMessage =
-      lastError && lastError.message ? lastError.message : String(lastError || 'unknown error');
-    throw new Error(
-      `cdp endpoint is not ready after ${timeout} ms (endpoints: ${endpoints.join(', ')}): ${lastMessage}`
-    );
+  const connect = async (session = {}) => {
+    if (sessionRuntimeProtocol(session) === 'playwright') {
+      return await connectPlaywright(session);
+    }
+    return await connectCDP(session);
   };
 
   const api = {
-    chromium,
+    playwright,
+    chromium: playwright.chromium,
+    firefox: playwright.firefox,
     launch,
     connect,
+    connectCDP,
+    connectPlaywright,
     selector,
     params,
     log,
@@ -483,13 +565,13 @@ async function main() {
     throw new Error('runtimeDir is required');
   }
 
-  const { chromium } = require(path.join(runtimeDir, 'node_modules', 'playwright-core'));
+  const playwright = require(path.join(runtimeDir, 'node_modules', 'playwright-core'));
   const taskType = String(payload.taskType || 'script').trim() || 'script';
   if (taskType !== 'script') {
     throw new Error(`unsupported automation task type: ${taskType}`);
   }
 
-  const result = await runScriptTask(payload, chromium);
+  const result = await runScriptTask(payload, playwright);
   await writeStream(process.stdout, JSON.stringify(result));
   process.exit(0);
 }

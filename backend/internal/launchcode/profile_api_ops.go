@@ -145,7 +145,10 @@ func (s *LaunchServer) profileSnapshotByID(profileID string) (*browser.Profile, 
 	}
 
 	snapshot.LaunchCode = s.resolveProfileLaunchCode(snapshot.ProfileId, snapshot.LaunchCode)
-	return &snapshot, http.StatusOK, ""
+	if strings.TrimSpace(snapshot.RuntimeProtocol) == "" && s.browserMgr != nil {
+		snapshot.RuntimeProtocol = s.browserMgr.RuntimeProtocolForProfile(&snapshot)
+	}
+	return s.normalizeRuntimeFields(&snapshot), http.StatusOK, ""
 }
 
 func (s *LaunchServer) applyRequestedLaunchCode(profileID, currentCode, requestedCode string) (string, int, string) {

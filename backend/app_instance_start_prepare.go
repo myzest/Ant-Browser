@@ -24,6 +24,8 @@ type browserStartInput struct {
 type browserStartPlan struct {
 	profile               *BrowserProfile
 	chromeBinaryPath      string
+	coreType              string
+	runtimeProtocol       string
 	userDataDir           string
 	args                  []string
 	effectiveProxy        string
@@ -113,7 +115,7 @@ func (a *App) resolveBrowserStartProfile(input browserStartInput) (*BrowserProfi
 }
 
 func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserProfile) (*browserStartPlan, error) {
-	sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, chromeBinaryPath, userDataDir, err := a.prepareBrowserLaunchContext(input, profile)
+	sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, chromeBinaryPath, coreType, runtimeProtocol, userDataDir, err := a.prepareBrowserLaunchContext(input, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -142,6 +144,8 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 	return &browserStartPlan{
 		profile:               profile,
 		chromeBinaryPath:      chromeBinaryPath,
+		coreType:              coreType,
+		runtimeProtocol:       runtimeProtocol,
 		userDataDir:           userDataDir,
 		args:                  buildBrowserLaunchArgs(profile, userDataDir, assignedDebugPort, effectiveProxy, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, input.StartURLs, a.browserDefaultStartURLs(), input.SkipDefaultStartURLs, browserRestoreLastSession(a.config)),
 		effectiveProxy:        effectiveProxy,
@@ -155,7 +159,7 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 	}, nil
 }
 
-func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *BrowserProfile) ([]string, []string, string, string, error) {
+func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *BrowserProfile) ([]string, []string, string, string, string, string, error) {
 	log := logger.New("Browser")
 
 	sanitizedProfileLaunchArgs, managedProfileArgs := sanitizeManagedLaunchArgs(profile.LaunchArgs)
@@ -168,7 +172,24 @@ func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *Brow
 		_ = a.browserMgr.SaveProfiles()
 	}
 
-	chromeBinaryPath, err := a.browserMgr.ResolveChromeBinary(profile)
+	core, coreErr := a.browserMgr.ResolveProfileCore(profile)
+	if coreErr != nil {
+		startErr := fmt.Errorf("实例启动失败：%w", coreErr)
+		log.Error("内核路径解析失败", logger.F("profile_id", input.ProfileID), logger.F("error", coreErr.Error()), logger.F("reason", startErr.Error()))
+		profile.LastError = startErr.Error()
+		return nil, nil, "", "", "", "", startErr
+	}
+	coreType := browser.NormalizeCoreType(core.CoreType)
+	runtimeProtocol := browser.RuntimeProtocolForCoreType(coreType)
+	if runtimeProtocol == browser.RuntimeProtocolPlaywright {
+		startErr := fmt.Errorf("实例启动失败：Camoufox/Playwright 运行时启动器尚未配置。当前版本已支持 runtimeProtocol=playwright 的状态/API/脚本连接骨架，但不能用 Chromium 启动参数直接拉起 Camoufox；请接入 Camoufox launchServer 后再启动该内核。")
+		log.Error("Camoufox Playwright 启动器未配置", logger.F("profile_id", input.ProfileID), logger.F("core_type", coreType), logger.F("reason", startErr.Error()))
+		profile.RuntimeProtocol = runtimeProtocol
+		profile.LastError = startErr.Error()
+		return nil, nil, "", "", "", "", startErr
+	}
+
+	chromeBinaryPath, err := a.browserMgr.ResolveCoreExecutable(core)
 	if err != nil {
 		startErr := fmt.Errorf("实例启动失败：%w", err)
 		log.Error("内核路径解析失败",
@@ -177,7 +198,7 @@ func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *Brow
 			logger.F("reason", startErr.Error()),
 		)
 		profile.LastError = startErr.Error()
-		return nil, nil, "", "", startErr
+		return nil, nil, "", "", "", "", startErr
 	}
 
 	userDataDir := a.browserMgr.ResolveUserDataDir(profile)
@@ -190,7 +211,7 @@ func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *Brow
 			logger.F("reason", startErr.Error()),
 		)
 		profile.LastError = startErr.Error()
-		return nil, nil, "", "", startErr
+		return nil, nil, "", "", "", "", startErr
 	}
 
 	if err := browser.EnsureDefaultBookmarks(userDataDir, a.BookmarkList()); err != nil {
@@ -208,11 +229,11 @@ func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *Brow
 				logger.F("reason", startErr.Error()),
 			)
 			profile.LastError = startErr.Error()
-			return nil, nil, "", "", startErr
+			return nil, nil, "", "", "", "", startErr
 		}
 	}
 
-	return sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, chromeBinaryPath, userDataDir, nil
+	return sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, chromeBinaryPath, coreType, runtimeProtocol, userDataDir, nil
 }
 
 func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPort int, effectiveProxy string, sanitizedProfileLaunchArgs []string, sanitizedExtraLaunchArgs []string, startURLs []string, defaultStartURLs []string, skipDefaultStartURLs bool, restoreLastSession bool) []string {

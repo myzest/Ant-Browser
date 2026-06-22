@@ -66,7 +66,7 @@ func (a *App) AutomationScriptRunWithOptions(input automation.ScriptRunRequest) 
 		if errText == "" {
 			run.Status = "success"
 		}
-	case "playwright-cdp":
+	case "playwright-cdp", "playwright-firefox":
 		resultText, summary, errText := a.runPlaywrightScript(runCtx, script, input)
 		run.ResultText = resultText
 		run.Summary = summary

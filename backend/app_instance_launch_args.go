@@ -126,6 +126,8 @@ func (a *App) markProfileStoppedLocked(profileId string, profile *BrowserProfile
 	profile.DebugReady = false
 	profile.Pid = 0
 	profile.DebugPort = 0
+	profile.RuntimeEndpoint = ""
+	profile.PlaywrightEndpoint = ""
 	profile.RuntimeWarning = ""
 	profile.LastStopAt = time.Now().Format(time.RFC3339)
 	delete(a.browserMgr.BrowserProcesses, profileId)

@@ -166,6 +166,10 @@ export function BrowserCoreValidate(arg1) {
   return window['go']['main']['App']['BrowserCoreValidate'](arg1);
 }
 
+export function BrowserCoreValidateWithType(arg1, arg2) {
+  return window['go']['main']['App']['BrowserCoreValidateWithType'](arg1, arg2);
+}
+
 export function BrowserExportCookies(arg1) {
   return window['go']['main']['App']['BrowserExportCookies'](arg1);
 }

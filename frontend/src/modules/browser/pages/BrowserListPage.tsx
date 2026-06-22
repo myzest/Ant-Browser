@@ -140,7 +140,7 @@ export function BrowserListPage() {
   // 内核管理
   const [cores, setCores] = useState<BrowserCore[]>([])
   const [coreModalOpen, setCoreModalOpen] = useState(false)
-  const [coreForm, setCoreForm] = useState<BrowserCoreInput>({ coreId: '', coreName: '', corePath: '', isDefault: false })
+  const [coreForm, setCoreForm] = useState<BrowserCoreInput>({ coreId: '', coreName: '', corePath: '', coreType: 'chromium', isDefault: false })
   const [coreValidation, setCoreValidation] = useState<{ valid: boolean; message: string } | null>(null)
   const [savingCore, setSavingCore] = useState(false)
 
@@ -631,7 +631,7 @@ export function BrowserListPage() {
 
   // 内核管理
   const handleOpenCoreModal = (core?: BrowserCore) => {
-    setCoreForm(core ? { ...core } : { coreId: '', coreName: '', corePath: '', isDefault: false })
+    setCoreForm(core ? { ...core } : { coreId: '', coreName: '', corePath: '', coreType: 'chromium', isDefault: false })
     setCoreValidation(null)
     setCoreModalOpen(true)
   }
@@ -641,7 +641,7 @@ export function BrowserListPage() {
       setCoreValidation({ valid: false, message: '请输入路径' })
       return
     }
-    const result = await validateBrowserCorePath(coreForm.corePath)
+    const result = await validateBrowserCorePath(coreForm.corePath, coreForm.coreType || 'chromium')
     setCoreValidation(result)
   }
 

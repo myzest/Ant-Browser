@@ -507,6 +507,7 @@ export namespace browser {
 
 	export class CoreExtendedInfo {
 	    coreId: string;
+	    coreType: string;
 	    chromeVersion: string;
 	    instanceCount: number;
 
@@ -517,6 +518,7 @@ export namespace browser {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.coreId = source["coreId"];
+	        this.coreType = source["coreType"];
 	        this.chromeVersion = source["chromeVersion"];
 	        this.instanceCount = source["instanceCount"];
 	    }
@@ -525,6 +527,7 @@ export namespace browser {
 	    coreId: string;
 	    coreName: string;
 	    corePath: string;
+	    coreType: string;
 	    isDefault: boolean;
 
 	    static createFrom(source: any = {}) {
@@ -536,6 +539,7 @@ export namespace browser {
 	        this.coreId = source["coreId"];
 	        this.coreName = source["coreName"];
 	        this.corePath = source["corePath"];
+	        this.coreType = source["coreType"];
 	        this.isDefault = source["isDefault"];
 	    }
 	}
@@ -636,6 +640,9 @@ export namespace browser {
 	    debugPort: number;
 	    debugReady: boolean;
 	    pid: number;
+	    runtimeProtocol: string;
+	    runtimeEndpoint: string;
+	    playwrightEndpoint: string;
 	    runtimeWarning: string;
 	    lastError: string;
 	    createdAt: string;
@@ -669,6 +676,9 @@ export namespace browser {
 	        this.debugPort = source["debugPort"];
 	        this.debugReady = source["debugReady"];
 	        this.pid = source["pid"];
+	        this.runtimeProtocol = source["runtimeProtocol"];
+	        this.runtimeEndpoint = source["runtimeEndpoint"];
+	        this.playwrightEndpoint = source["playwrightEndpoint"];
 	        this.runtimeWarning = source["runtimeWarning"];
 	        this.lastError = source["lastError"];
 	        this.createdAt = source["createdAt"];
@@ -774,6 +784,7 @@ export namespace config {
 	    coreId: string;
 	    coreName: string;
 	    corePath: string;
+	    coreType: string;
 	    isDefault: boolean;
 
 	    static createFrom(source: any = {}) {
@@ -785,6 +796,7 @@ export namespace config {
 	        this.coreId = source["coreId"];
 	        this.coreName = source["coreName"];
 	        this.corePath = source["corePath"];
+	        this.coreType = source["coreType"];
 	        this.isDefault = source["isDefault"];
 	    }
 	}

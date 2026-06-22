@@ -166,6 +166,7 @@ export function BrowserListSettingsModal({
 }: BrowserListSettingsModalProps) {
   const coreColumns: TableColumn<BrowserCore>[] = [
     { key: 'coreName', title: '名称' },
+    { key: 'coreType', title: '类型', render: (value) => (value === 'camoufox' ? 'Camoufox' : 'Chromium') },
     { key: 'corePath', title: '路径' },
     {
       key: 'isDefault',
@@ -341,6 +342,17 @@ export function BrowserCoreEditorModal({
             onChange={(event) => onCoreFormChange({ coreName: event.target.value })}
             placeholder="Chrome 142"
           />
+        </FormItem>
+        <FormItem label="内核类型" required>
+          <select
+            value={coreForm.coreType || 'chromium'}
+            onChange={(event) => onCoreFormChange({ coreType: event.target.value })}
+            className="w-full px-3 py-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+          >
+            <option value="chromium">Chromium / Chrome</option>
+            <option value="camoufox">Camoufox / Playwright</option>
+          </select>
+          <p className="mt-1 text-xs text-[var(--color-text-muted)]">Camoufox 当前使用 Playwright runtime；不会走 CDP 接管。</p>
         </FormItem>
         <FormItem label="内核路径" required>
           <div className="flex gap-2">

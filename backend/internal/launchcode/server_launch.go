@@ -9,25 +9,20 @@ import (
 )
 
 func (s *LaunchServer) launchSuccessPayload(profile *browser.Profile, launchCode string) map[string]interface{} {
-	cdpURL := s.CDPURL()
-	cdpPort := s.Port()
-	if cdpURL == "" && profile != nil && profile.DebugReady && profile.DebugPort > 0 {
-		cdpPort = profile.DebugPort
-		cdpURL = fmt.Sprintf("http://127.0.0.1:%d", profile.DebugPort)
+	payload := s.profileRuntimePayload(profile)
+	if profile == nil {
+		return payload
 	}
-
-	return map[string]interface{}{
-		"ok":             true,
-		"profileId":      profile.ProfileId,
-		"profileName":    profile.ProfileName,
-		"launchCode":     launchCode,
-		"pid":            profile.Pid,
-		"debugPort":      profile.DebugPort,
-		"debugReady":     profile.DebugReady,
-		"runtimeWarning": profile.RuntimeWarning,
-		"cdpPort":        cdpPort,
-		"cdpUrl":         cdpURL,
+	if strings.TrimSpace(launchCode) != "" {
+		payload["launchCode"] = launchCode
 	}
+	// 保留 /api/launch 的历史字段形状。
+	payload["ok"] = true
+	payload["pid"] = profile.Pid
+	payload["debugPort"] = profile.DebugPort
+	payload["debugReady"] = profile.DebugReady
+	payload["runtimeWarning"] = profile.RuntimeWarning
+	return payload
 }
 
 func (s *LaunchServer) launchByCode(code string, params LaunchRequestParams) (*browser.Profile, string, int, string) {
@@ -113,6 +108,9 @@ func (s *LaunchServer) launchBySelectorInternal(selector LaunchSelector, params 
 	if profile != nil && launchCode != "" {
 		profile.LaunchCode = launchCode
 	}
+	if profile != nil && profile.DebugReady {
+		s.SetActiveProfile(profile)
+	}
 
 	return profile, launchCode, http.StatusOK, ""
 }
@@ -152,6 +150,9 @@ func (s *LaunchServer) launchAllBySelector(selector LaunchSelector, params Launc
 		if profile != nil && launchCode != "" {
 			profile.LaunchCode = launchCode
 		}
+		if profile != nil && profile.DebugReady {
+			s.SetActiveProfile(profile)
+		}
 
 		profiles = append(profiles, profile)
 	}
@@ -183,15 +184,23 @@ func (s *LaunchServer) launchBatchSuccessPayload(profiles []*browser.Profile) ma
 		if profile == nil {
 			continue
 		}
+		normalized := s.normalizeRuntimeProfile(profile)
+		if normalized == nil {
+			continue
+		}
 		item := map[string]interface{}{
-			"profileId":      profile.ProfileId,
-			"profileName":    profile.ProfileName,
-			"launchCode":     profile.LaunchCode,
-			"pid":            profile.Pid,
-			"debugPort":      profile.DebugPort,
-			"debugReady":     profile.DebugReady,
-			"runtimeWarning": profile.RuntimeWarning,
-			"isActive":       i == len(profiles)-1,
+			"profileId":            normalized.ProfileId,
+			"profileName":          normalized.ProfileName,
+			"launchCode":           normalized.LaunchCode,
+			"pid":                  normalized.Pid,
+			"debugPort":            normalized.DebugPort,
+			"debugReady":           normalized.DebugReady,
+			"runtimeProtocol":      normalized.RuntimeProtocol,
+			"runtimeEndpoint":      normalized.RuntimeEndpoint,
+			"playwrightEndpoint":   normalized.PlaywrightEndpoint,
+			"playwrightWsEndpoint": normalized.PlaywrightEndpoint,
+			"runtimeWarning":       normalized.RuntimeWarning,
+			"isActive":             i == len(profiles)-1,
 		}
 		items = append(items, item)
 	}
@@ -204,13 +213,36 @@ func (s *LaunchServer) launchBatchSuccessPayload(profiles []*browser.Profile) ma
 		cdpURL = fmt.Sprintf("http://127.0.0.1:%d", activeProfile.DebugPort)
 	}
 
+	runtimeProtocol := browser.RuntimeProtocolCDP
+	runtimeEndpoint := cdpURL
+	playwrightEndpoint := ""
+	if activeProfile != nil {
+		normalized := s.normalizeRuntimeProfile(activeProfile)
+		if normalized != nil {
+			runtimeProtocol = normalized.RuntimeProtocol
+			runtimeEndpoint = normalized.RuntimeEndpoint
+			playwrightEndpoint = normalized.PlaywrightEndpoint
+		}
+	}
+	if runtimeProtocol == browser.RuntimeProtocolPlaywright {
+		cdpPort = 0
+		cdpURL = ""
+		if runtimeEndpoint == "" {
+			runtimeEndpoint = playwrightEndpoint
+		}
+	}
+
 	payload := map[string]interface{}{
-		"ok":        true,
-		"matchMode": launchMatchModeAll,
-		"count":     len(items),
-		"items":     items,
-		"cdpPort":   cdpPort,
-		"cdpUrl":    cdpURL,
+		"ok":                   true,
+		"matchMode":            launchMatchModeAll,
+		"count":                len(items),
+		"items":                items,
+		"runtimeProtocol":      runtimeProtocol,
+		"runtimeEndpoint":      runtimeEndpoint,
+		"playwrightEndpoint":   playwrightEndpoint,
+		"playwrightWsEndpoint": playwrightEndpoint,
+		"cdpPort":              cdpPort,
+		"cdpUrl":               cdpURL,
 	}
 	if activeProfile != nil {
 		payload["activeProfileId"] = activeProfile.ProfileId

@@ -47,8 +47,11 @@ export async function setDefaultBrowserCore(coreId: string): Promise<boolean> {
   return true
 }
 
-export async function validateBrowserCorePath(corePath: string): Promise<BrowserCoreValidateResult> {
+export async function validateBrowserCorePath(corePath: string, coreType = 'chromium'): Promise<BrowserCoreValidateResult> {
   const bindings: any = await getBindings()
+  if (bindings?.BrowserCoreValidateWithType) {
+    return (await bindings.BrowserCoreValidateWithType(corePath, coreType)) || { valid: false, message: '验证失败' }
+  }
   if (bindings?.BrowserCoreValidate) {
     return (await bindings.BrowserCoreValidate(corePath)) || { valid: false, message: '验证失败' }
   }

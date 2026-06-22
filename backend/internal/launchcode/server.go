@@ -104,20 +104,23 @@ type LaunchCallRecord struct {
 
 // LaunchServer 本地 HTTP 唤起服务
 type LaunchServer struct {
-	service    *LaunchCodeService
-	starter    BrowserStarter
-	browserMgr *browser.Manager
-	port       int
-	server     *http.Server
-	mu         sync.Mutex
-	authMu     sync.RWMutex
-	logMu      sync.Mutex
-	callLogs   []LaunchCallRecord
-	activeMu   sync.RWMutex
-	activePort int
-	activeID   string
-	activeName string
-	apiAuth    APIAuthConfig
+	service                  *LaunchCodeService
+	starter                  BrowserStarter
+	browserMgr               *browser.Manager
+	port                     int
+	server                   *http.Server
+	mu                       sync.Mutex
+	authMu                   sync.RWMutex
+	logMu                    sync.Mutex
+	callLogs                 []LaunchCallRecord
+	activeMu                 sync.RWMutex
+	activePort               int
+	activeID                 string
+	activeName               string
+	activeProtocol           string
+	activeEndpoint           string
+	activePlaywrightEndpoint string
+	apiAuth                  APIAuthConfig
 }
 
 // NewLaunchServer 创建 LaunchServer
@@ -254,14 +257,43 @@ func (s *LaunchServer) ActiveDebugPort() int {
 
 // SetActiveProfile 将统一入口切换到指定实例的调试端口。
 func (s *LaunchServer) SetActiveProfile(profile *browser.Profile) {
-	if profile == nil || profile.DebugPort <= 0 || !profile.DebugReady {
+	if profile == nil || !profile.DebugReady {
 		return
+	}
+
+	protocol := browser.NormalizeRuntimeProtocol(profile.RuntimeProtocol)
+	endpoint := strings.TrimSpace(profile.RuntimeEndpoint)
+	playwrightEndpoint := strings.TrimSpace(profile.PlaywrightEndpoint)
+
+	switch protocol {
+	case browser.RuntimeProtocolPlaywright:
+		if endpoint == "" {
+			endpoint = playwrightEndpoint
+		}
+		if playwrightEndpoint == "" {
+			playwrightEndpoint = endpoint
+		}
+		if endpoint == "" {
+			return
+		}
+	default:
+		protocol = browser.RuntimeProtocolCDP
+		if profile.DebugPort <= 0 {
+			return
+		}
+		endpoint = s.CDPURL()
+		if endpoint == "" {
+			endpoint = fmt.Sprintf("http://127.0.0.1:%d", profile.DebugPort)
+		}
 	}
 
 	s.activeMu.Lock()
 	s.activePort = profile.DebugPort
 	s.activeID = profile.ProfileId
 	s.activeName = profile.ProfileName
+	s.activeProtocol = protocol
+	s.activeEndpoint = endpoint
+	s.activePlaywrightEndpoint = playwrightEndpoint
 	s.activeMu.Unlock()
 }
 
@@ -277,14 +309,38 @@ func (s *LaunchServer) ClearActiveProfile(profileID string) {
 		s.activePort = 0
 		s.activeID = ""
 		s.activeName = ""
+		s.activeProtocol = ""
+		s.activeEndpoint = ""
+		s.activePlaywrightEndpoint = ""
 	}
 	s.activeMu.Unlock()
 }
 
-func (s *LaunchServer) activeTarget() (int, string, string) {
+type activeRuntimeTarget struct {
+	Port               int
+	ProfileID          string
+	ProfileName        string
+	Protocol           string
+	Endpoint           string
+	PlaywrightEndpoint string
+}
+
+func (s *LaunchServer) activeRuntimeTarget() activeRuntimeTarget {
 	s.activeMu.RLock()
 	defer s.activeMu.RUnlock()
-	return s.activePort, s.activeID, s.activeName
+	return activeRuntimeTarget{
+		Port:               s.activePort,
+		ProfileID:          s.activeID,
+		ProfileName:        s.activeName,
+		Protocol:           browser.NormalizeRuntimeProtocol(s.activeProtocol),
+		Endpoint:           s.activeEndpoint,
+		PlaywrightEndpoint: s.activePlaywrightEndpoint,
+	}
+}
+
+func (s *LaunchServer) activeTarget() (int, string, string) {
+	target := s.activeRuntimeTarget()
+	return target.Port, target.ProfileID, target.ProfileName
 }
 
 // ActiveProfile 返回当前统一 CDP 入口对应的实例信息。

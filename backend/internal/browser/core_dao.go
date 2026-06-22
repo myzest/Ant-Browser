@@ -27,7 +27,7 @@ func NewSQLiteCoreDAO(db *sql.DB) *SQLiteCoreDAO {
 // List 查询所有内核，按 sort_order 升序
 func (d *SQLiteCoreDAO) List() ([]Core, error) {
 	rows, err := d.db.Query(`
-		SELECT core_id, core_name, core_path, is_default
+		SELECT core_id, core_name, core_path, COALESCE(core_type, 'chromium'), is_default
 		FROM browser_cores ORDER BY sort_order ASC, created_at ASC`)
 	if err != nil {
 		return nil, fmt.Errorf("查询内核列表失败: %w", err)
@@ -38,9 +38,10 @@ func (d *SQLiteCoreDAO) List() ([]Core, error) {
 	for rows.Next() {
 		var c Core
 		var isDefault int
-		if err := rows.Scan(&c.CoreId, &c.CoreName, &c.CorePath, &isDefault); err != nil {
+		if err := rows.Scan(&c.CoreId, &c.CoreName, &c.CorePath, &c.CoreType, &isDefault); err != nil {
 			return nil, fmt.Errorf("读取内核行失败: %w", err)
 		}
+		c.CoreType = NormalizeCoreType(c.CoreType)
 		c.IsDefault = isDefault == 1
 		list = append(list, c)
 	}
@@ -55,13 +56,14 @@ func (d *SQLiteCoreDAO) Upsert(core Core) error {
 		isDefault = 1
 	}
 	_, err := d.db.Exec(`
-		INSERT INTO browser_cores (core_id, core_name, core_path, is_default, created_at)
-		VALUES (?, ?, ?, ?, ?)
+		INSERT INTO browser_cores (core_id, core_name, core_path, core_type, is_default, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
 		ON CONFLICT(core_id) DO UPDATE SET
 		  core_name  = excluded.core_name,
 		  core_path  = excluded.core_path,
+		  core_type  = excluded.core_type,
 		  is_default = excluded.is_default`,
-		core.CoreId, core.CoreName, core.CorePath, isDefault, now,
+		core.CoreId, core.CoreName, core.CorePath, NormalizeCoreType(core.CoreType), isDefault, now,
 	)
 	if err != nil {
 		return fmt.Errorf("保存内核配置失败: %w", err)

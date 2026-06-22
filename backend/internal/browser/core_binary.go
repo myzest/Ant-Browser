@@ -9,6 +9,27 @@ import (
 
 // CoreExecutableCandidates 返回当前平台可接受的浏览器可执行文件候选名。
 func CoreExecutableCandidates() []string {
+	return CoreExecutableCandidatesForType(CoreTypeChromium)
+}
+
+// CoreExecutableCandidatesForType 返回指定内核类型在当前平台可接受的可执行文件候选名。
+func CoreExecutableCandidatesForType(coreType string) []string {
+	if NormalizeCoreType(coreType) == CoreTypeCamoufox {
+		switch goruntime.GOOS {
+		case "windows":
+			return []string{"camoufox.exe"}
+		case "linux":
+			return []string{"camoufox-bin", "camoufox"}
+		case "darwin":
+			return []string{
+				"Camoufox.app/Contents/MacOS/camoufox",
+				"Camoufox.app/Contents/Resources/camoufox",
+				"camoufox",
+			}
+		default:
+			return []string{"camoufox"}
+		}
+	}
 	switch goruntime.GOOS {
 	case "windows":
 		return []string{"chrome.exe"}
@@ -27,17 +48,23 @@ func CoreExecutableCandidates() []string {
 
 // FindCoreExecutable 在指定目录查找可执行文件，返回绝对路径和命中的候选名。
 func FindCoreExecutable(baseDir string) (string, string, bool) {
+	return FindCoreExecutableForType(baseDir, CoreTypeChromium)
+}
+
+// FindCoreExecutableForType 在指定目录查找指定类型内核的可执行文件。
+func FindCoreExecutableForType(baseDir string, coreType string) (string, string, bool) {
 	baseDir = strings.TrimSpace(baseDir)
 	if baseDir == "" {
 		return "", "", false
 	}
-	if directPath, directCandidate, ok := findDirectCoreExecutable(baseDir); ok {
+	candidates := CoreExecutableCandidatesForType(coreType)
+	if directPath, directCandidate, ok := findDirectCoreExecutable(baseDir, candidates); ok {
 		return directPath, directCandidate, true
 	}
-	if bundlePath, bundleCandidate, ok := findAppBundleExecutable(baseDir); ok {
+	if bundlePath, bundleCandidate, ok := findAppBundleExecutable(baseDir, candidates); ok {
 		return bundlePath, bundleCandidate, true
 	}
-	for _, candidate := range CoreExecutableCandidates() {
+	for _, candidate := range candidates {
 		p := filepath.Join(baseDir, filepath.FromSlash(candidate))
 		if _, err := os.Stat(p); err == nil {
 			return p, candidate, true
@@ -46,14 +73,14 @@ func FindCoreExecutable(baseDir string) (string, string, bool) {
 	return "", "", false
 }
 
-func findDirectCoreExecutable(path string) (string, string, bool) {
+func findDirectCoreExecutable(path string, candidates []string) (string, string, bool) {
 	info, err := os.Stat(path)
 	if err != nil || info.IsDir() {
 		return "", "", false
 	}
 
 	normalized := filepath.ToSlash(filepath.Clean(path))
-	for _, candidate := range CoreExecutableCandidates() {
+	for _, candidate := range candidates {
 		candidatePath := filepath.ToSlash(candidate)
 		if strings.HasSuffix(normalized, candidatePath) || filepath.Base(normalized) == filepath.Base(candidatePath) {
 			return path, candidate, true
@@ -63,7 +90,7 @@ func findDirectCoreExecutable(path string) (string, string, bool) {
 	return "", "", false
 }
 
-func findAppBundleExecutable(path string) (string, string, bool) {
+func findAppBundleExecutable(path string, candidates []string) (string, string, bool) {
 	if goruntime.GOOS != "darwin" {
 		return "", "", false
 	}
@@ -78,7 +105,7 @@ func findAppBundleExecutable(path string) (string, string, bool) {
 		return "", "", false
 	}
 
-	for _, candidate := range CoreExecutableCandidates() {
+	for _, candidate := range candidates {
 		candidatePath := filepath.ToSlash(candidate)
 		appMarker := ".app/"
 		index := strings.Index(strings.ToLower(candidatePath), appMarker)

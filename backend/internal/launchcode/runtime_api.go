@@ -79,9 +79,10 @@ func (s *LaunchServer) handleRuntimeActive(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	activePort, activeProfileID, activeProfileName := s.activeTarget()
-	if activePort <= 0 || strings.TrimSpace(activeProfileID) == "" {
-		writeJSON(w, http.StatusOK, map[string]interface{}{
+	target := s.activeRuntimeTarget()
+	activePort, activeProfileID, activeProfileName := target.Port, target.ProfileID, target.ProfileName
+	if strings.TrimSpace(activeProfileID) == "" || (activePort <= 0 && strings.TrimSpace(target.Endpoint) == "") {
+		payload := map[string]interface{}{
 			"ok":             true,
 			"active":         false,
 			"profileId":      "",
@@ -99,7 +100,11 @@ func (s *LaunchServer) handleRuntimeActive(w http.ResponseWriter, r *http.Reques
 			"cdpUrl":         "",
 			"directDebugUrl": "",
 			"profile":        nil,
-		})
+		}
+		for key, value := range runtimePayloadInactiveFields() {
+			payload[key] = value
+		}
+		writeJSON(w, http.StatusOK, payload)
 		return
 	}
 

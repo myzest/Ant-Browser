@@ -107,7 +107,7 @@ func (a *App) autoDetectCores() {
 		cores = a.browserMgr.ListCores()
 	}
 	for _, core := range cores {
-		result := a.browserMgr.ValidateCorePath(core.CorePath)
+		result := a.browserMgr.ValidateCorePathForType(core.CorePath, core.CoreType)
 		if result.Valid {
 			log.Debug("内核路径有效", logger.F("core_id", core.CoreId), logger.F("path", core.CorePath))
 		} else {

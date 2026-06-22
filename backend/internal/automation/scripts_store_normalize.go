@@ -75,6 +75,8 @@ func normalizeScriptType(value string) string {
 	switch strings.TrimSpace(value) {
 	case "launch-api":
 		return "launch-api"
+	case "playwright-firefox", "camoufox-playwright":
+		return "playwright-firefox"
 	default:
 		return "playwright-cdp"
 	}

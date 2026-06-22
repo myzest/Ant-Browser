@@ -4,6 +4,7 @@ import "time"
 
 type ScriptTaskRequest struct {
 	TaskKey          string         `json:"taskKey"`
+	ScriptType       string         `json:"scriptType,omitempty"`
 	ScriptPath       string         `json:"scriptPath"`
 	Selector         map[string]any `json:"selector,omitempty"`
 	Params           map[string]any `json:"params,omitempty"`
@@ -31,6 +32,7 @@ type ScriptTaskResult struct {
 
 type taskRunnerPayload struct {
 	TaskType         string         `json:"taskType,omitempty"`
+	ScriptType       string         `json:"scriptType,omitempty"`
 	RuntimeDir       string         `json:"runtimeDir"`
 	ScriptPath       string         `json:"scriptPath,omitempty"`
 	Selector         map[string]any `json:"selector,omitempty"`

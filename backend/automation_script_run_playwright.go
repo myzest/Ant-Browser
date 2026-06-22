@@ -87,6 +87,7 @@ func (a *App) runPlaywrightScript(ctx context.Context, script automation.ScriptR
 
 	taskResult, err := a.automationMgr.RunScriptTask(ctx, automation.ScriptTaskRequest{
 		TaskKey:          "script:" + script.ID,
+		ScriptType:       script.Type,
 		ScriptPath:       scriptPath,
 		Selector:         selector,
 		Params:           params,

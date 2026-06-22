@@ -28,7 +28,7 @@ export function BrowserSettingsModal({ open, onClose, settings: initSettings, co
 
   // 内核编辑弹窗
   const [coreModalOpen, setCoreModalOpen] = useState(false)
-  const [coreForm, setCoreForm] = useState<BrowserCoreInput>({ coreId: '', coreName: '', corePath: '', isDefault: false })
+  const [coreForm, setCoreForm] = useState<BrowserCoreInput>({ coreId: '', coreName: '', corePath: '', coreType: 'chromium', isDefault: false })
   const [coreValidation, setCoreValidation] = useState<{ valid: boolean; message: string } | null>(null)
   const [savingCore, setSavingCore] = useState(false)
 
@@ -51,14 +51,14 @@ export function BrowserSettingsModal({ open, onClose, settings: initSettings, co
   }
 
   const handleOpenCoreModal = (core?: BrowserCore) => {
-    setCoreForm(core ? { ...core } : { coreId: '', coreName: '', corePath: '', isDefault: false })
+    setCoreForm(core ? { coreType: 'chromium', ...core } : { coreId: '', coreName: '', corePath: '', coreType: 'chromium', isDefault: false })
     setCoreValidation(null)
     setCoreModalOpen(true)
   }
 
   const handleValidateCorePath = async () => {
     if (!coreForm.corePath.trim()) { setCoreValidation({ valid: false, message: '请输入路径' }); return }
-    setCoreValidation(await validateBrowserCorePath(coreForm.corePath))
+    setCoreValidation(await validateBrowserCorePath(coreForm.corePath, coreForm.coreType || 'chromium'))
   }
 
   const handleSaveCore = async () => {

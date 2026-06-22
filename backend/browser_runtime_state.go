@@ -8,6 +8,7 @@ import (
 	"syscall"
 	"time"
 
+	"ant-chrome/backend/internal/browser"
 	"ant-chrome/backend/internal/logger"
 
 	"github.com/wailsapp/wails/v2/pkg/runtime"
@@ -54,14 +55,17 @@ func browserInstanceEventPayload(profile *BrowserProfile, reused bool) map[strin
 		return map[string]interface{}{}
 	}
 	return map[string]interface{}{
-		"profileId":      profile.ProfileId,
-		"profileName":    profile.ProfileName,
-		"debugPort":      profile.DebugPort,
-		"debugReady":     profile.DebugReady,
-		"pid":            profile.Pid,
-		"reused":         reused,
-		"running":        profile.Running,
-		"runtimeWarning": profile.RuntimeWarning,
+		"profileId":          profile.ProfileId,
+		"profileName":        profile.ProfileName,
+		"debugPort":          profile.DebugPort,
+		"debugReady":         profile.DebugReady,
+		"pid":                profile.Pid,
+		"runtimeProtocol":    profile.RuntimeProtocol,
+		"runtimeEndpoint":    profile.RuntimeEndpoint,
+		"playwrightEndpoint": profile.PlaywrightEndpoint,
+		"reused":             reused,
+		"running":            profile.Running,
+		"runtimeWarning":     profile.RuntimeWarning,
 	}
 }
 
@@ -87,6 +91,15 @@ func (a *App) markProfileRunningLocked(profileId string, profile *BrowserProfile
 	profile.DebugPort = debugPort
 	profile.DebugReady = debugReady
 	profile.Pid = pid
+	if profile.RuntimeProtocol == "" {
+		profile.RuntimeProtocol = a.browserMgr.RuntimeProtocolForProfile(profile)
+	}
+	profile.RuntimeProtocol = browser.NormalizeRuntimeProtocol(profile.RuntimeProtocol)
+	if profile.RuntimeProtocol == browser.RuntimeProtocolCDP && debugPort > 0 {
+		profile.RuntimeEndpoint = fmt.Sprintf("http://127.0.0.1:%d", debugPort)
+	} else if profile.RuntimeProtocol == browser.RuntimeProtocolPlaywright && profile.PlaywrightEndpoint != "" {
+		profile.RuntimeEndpoint = profile.PlaywrightEndpoint
+	}
 	profile.LastStartAt = time.Now().Format(time.RFC3339)
 	profile.RuntimeWarning = runtimeWarning
 	profile.LastError = ""
@@ -104,6 +117,13 @@ func (a *App) markProfileDebugReadyLocked(profile *BrowserProfile, debugPort int
 	}
 	profile.DebugPort = debugPort
 	profile.DebugReady = true
+	if profile.RuntimeProtocol == "" {
+		profile.RuntimeProtocol = a.browserMgr.RuntimeProtocolForProfile(profile)
+	}
+	profile.RuntimeProtocol = browser.NormalizeRuntimeProtocol(profile.RuntimeProtocol)
+	if profile.RuntimeProtocol == browser.RuntimeProtocolCDP && debugPort > 0 {
+		profile.RuntimeEndpoint = fmt.Sprintf("http://127.0.0.1:%d", debugPort)
+	}
 	profile.RuntimeWarning = ""
 	profile.LastError = ""
 }

@@ -29,6 +29,9 @@ type Profile struct {
 	DebugPort          int      `json:"debugPort"`
 	DebugReady         bool     `json:"debugReady"`
 	Pid                int      `json:"pid"`
+	RuntimeProtocol    string   `json:"runtimeProtocol"`
+	RuntimeEndpoint    string   `json:"runtimeEndpoint"`
+	PlaywrightEndpoint string   `json:"playwrightEndpoint"`
 	RuntimeWarning     string   `json:"runtimeWarning"`
 	LastError          string   `json:"lastError"`
 	CreatedAt          string   `json:"createdAt"`
@@ -75,6 +78,7 @@ type CoreInput struct {
 	CoreId    string `json:"coreId"`
 	CoreName  string `json:"coreName"`
 	CorePath  string `json:"corePath"`
+	CoreType  string `json:"coreType"`
 	IsDefault bool   `json:"isDefault"`
 }
 
@@ -87,6 +91,7 @@ type CoreValidateResult struct {
 // CoreExtendedInfo 内核扩展信息
 type CoreExtendedInfo struct {
 	CoreId        string `json:"coreId"`
+	CoreType      string `json:"coreType"`
 	ChromeVersion string `json:"chromeVersion"`
 	InstanceCount int    `json:"instanceCount"`
 }

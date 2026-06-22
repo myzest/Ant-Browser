@@ -10,6 +10,7 @@ interface CoreDisplayInfo {
   coreId: string
   coreName: string
   corePath: string
+  coreType?: string
   isDefault: boolean
   pathValid: boolean
   pathMessage: string
@@ -48,7 +49,7 @@ export function CoreManagementPage() {
   // 编辑弹窗状态
   const [editModalOpen, setEditModalOpen] = useState(false)
   const [editingCore, setEditingCore] = useState<BrowserCore | null>(null)
-  const [editForm, setEditForm] = useState({ coreName: '', corePath: '' })
+  const [editForm, setEditForm] = useState({ coreName: '', corePath: '', coreType: 'chromium' })
   const [saving, setSaving] = useState(false)
   const [pathValidating, setPathValidating] = useState(false)
   const [pathValidResult, setPathValidResult] = useState<BrowserCoreValidateResult | null>(null)
@@ -108,12 +109,13 @@ export function CoreManagementPage() {
       // 验证所有路径并合并扩展信息
       const displayInfoList: CoreDisplayInfo[] = await Promise.all(
         coreList.map(async (core) => {
-          const result = await validateBrowserCorePath(core.corePath)
+          const result = await validateBrowserCorePath(core.corePath, core.coreType || 'chromium')
           const extended = extendedMap.get(core.coreId)
           return {
             coreId: core.coreId,
             coreName: core.coreName,
             corePath: core.corePath,
+            coreType: core.coreType || 'chromium',
             isDefault: core.isDefault,
             pathValid: result.valid,
             pathMessage: result.message,
@@ -136,12 +138,12 @@ export function CoreManagementPage() {
     }
     setPathValidating(true)
     try {
-      const result = await validateBrowserCorePath(path)
+      const result = await validateBrowserCorePath(path, editForm.coreType || 'chromium')
       setPathValidResult(result)
     } finally {
       setPathValidating(false)
     }
-  }, [])
+  }, [editForm.coreType])
 
   // 路径输入变化时触发验证（防抖）
   useEffect(() => {
@@ -157,6 +159,7 @@ export function CoreManagementPage() {
   // 表格列定义
   const columns: TableColumn<CoreDisplayInfo>[] = [
     { key: 'coreName', title: '内核名称', width: '150px' },
+    { key: 'coreType', title: '类型', width: '100px', render: (value) => value === 'camoufox' ? 'Camoufox' : 'Chromium' },
     { key: 'corePath', title: '内核路径', width: '180px' },
     {
       key: 'chromeVersion',
@@ -237,7 +240,7 @@ export function CoreManagementPage() {
   // 新增内核
   const handleAdd = () => {
     setEditingCore(null)
-    setEditForm({ coreName: '', corePath: '' })
+    setEditForm({ coreName: '', corePath: '', coreType: 'chromium' })
     setPathValidResult(null)
     setEditModalOpen(true)
   }
@@ -247,7 +250,7 @@ export function CoreManagementPage() {
     const core = cores.find(c => c.coreId === record.coreId)
     if (core) {
       setEditingCore(core)
-      setEditForm({ coreName: core.coreName, corePath: core.corePath })
+      setEditForm({ coreName: core.coreName, corePath: core.corePath, coreType: core.coreType || 'chromium' })
       setPathValidResult({ valid: record.pathValid, message: record.pathMessage })
       setEditModalOpen(true)
     }
@@ -269,6 +272,7 @@ export function CoreManagementPage() {
         coreId: editingCore?.coreId || `core-${Date.now()}`,
         coreName: editForm.coreName.trim(),
         corePath: editForm.corePath.trim(),
+        coreType: editForm.coreType || 'chromium',
         isDefault: editingCore?.isDefault || false,
       }
       await saveBrowserCore(input)
@@ -577,6 +581,17 @@ export function CoreManagementPage() {
               onChange={e => setEditForm(prev => ({ ...prev, coreName: e.target.value }))}
               placeholder="例如：Chrome 142"
             />
+          </FormItem>
+          <FormItem label="内核类型" required>
+            <select
+              value={editForm.coreType}
+              onChange={e => setEditForm(prev => ({ ...prev, coreType: e.target.value }))}
+              className="w-full px-3 py-2 border border-[var(--color-border)] rounded-lg bg-[var(--color-bg)] text-[var(--color-text)]"
+            >
+              <option value="chromium">Chromium / Chrome</option>
+              <option value="camoufox">Camoufox / Playwright</option>
+            </select>
+            <p className="mt-1 text-xs text-[var(--color-text-muted)]">Camoufox 当前使用 Playwright runtime；不会走 CDP 接管。</p>
           </FormItem>
           <FormItem label="内核路径" required>
             <Input

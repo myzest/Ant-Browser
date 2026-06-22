@@ -50,6 +50,7 @@ func (m *Manager) RunScriptTask(ctx context.Context, req ScriptTaskRequest) (Scr
 
 	payload := taskRunnerPayload{
 		TaskType:         taskTypeScript,
+		ScriptType:       strings.TrimSpace(req.ScriptType),
 		RuntimeDir:       state.RuntimeDir,
 		ScriptPath:       req.ScriptPath,
 		Selector:         req.Selector,

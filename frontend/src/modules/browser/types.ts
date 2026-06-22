@@ -18,6 +18,9 @@ export interface BrowserProfile {
   debugPort: number
   debugReady: boolean
   pid: number
+  runtimeProtocol?: string
+  runtimeEndpoint?: string
+  playwrightEndpoint?: string
   runtimeWarning: string
   lastError: string
   createdAt: string
@@ -78,6 +81,7 @@ export interface BrowserCore {
   coreId: string
   coreName: string
   corePath: string
+  coreType?: string
   isDefault: boolean
 }
 
@@ -85,6 +89,7 @@ export interface BrowserCoreInput {
   coreId: string
   coreName: string
   corePath: string
+  coreType?: string
   isDefault: boolean
 }
 
@@ -130,6 +135,7 @@ export interface ProxyIPHealthResult {
 
 export interface BrowserCoreExtended {
   coreId: string
+  coreType?: string
   chromeVersion: string
   instanceCount: number
 }

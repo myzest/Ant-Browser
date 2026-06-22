@@ -80,6 +80,7 @@ func (m *Manager) GetCoresExtendedInfo() []CoreExtendedInfo {
 	for _, core := range cores {
 		info := CoreExtendedInfo{
 			CoreId:        core.CoreId,
+			CoreType:      NormalizeCoreType(core.CoreType),
 			ChromeVersion: m.GetChromeVersion(core.CorePath),
 			InstanceCount: m.CountInstancesByCore(core.CoreId),
 		}

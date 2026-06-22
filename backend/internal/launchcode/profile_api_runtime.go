@@ -102,7 +102,40 @@ func (s *LaunchServer) normalizeRuntimeProfile(profile *browser.Profile) *browse
 
 	snapshot := *profile
 	snapshot.LaunchCode = s.resolveProfileLaunchCode(snapshot.ProfileId, snapshot.LaunchCode)
-	return &snapshot
+	return s.normalizeRuntimeFields(&snapshot)
+}
+
+func (s *LaunchServer) normalizeRuntimeFields(profile *browser.Profile) *browser.Profile {
+	if profile == nil {
+		return nil
+	}
+	if strings.TrimSpace(profile.RuntimeProtocol) == "" {
+		profile.RuntimeProtocol = browser.RuntimeProtocolCDP
+	}
+	profile.RuntimeProtocol = browser.NormalizeRuntimeProtocol(profile.RuntimeProtocol)
+	if profile.RuntimeProtocol == browser.RuntimeProtocolCDP {
+		if strings.TrimSpace(profile.RuntimeEndpoint) == "" && profile.DebugPort > 0 {
+			profile.RuntimeEndpoint = fmt.Sprintf("http://127.0.0.1:%d", profile.DebugPort)
+		}
+		profile.PlaywrightEndpoint = ""
+	} else if profile.RuntimeProtocol == browser.RuntimeProtocolPlaywright {
+		if strings.TrimSpace(profile.RuntimeEndpoint) == "" {
+			profile.RuntimeEndpoint = strings.TrimSpace(profile.PlaywrightEndpoint)
+		}
+		if strings.TrimSpace(profile.PlaywrightEndpoint) == "" {
+			profile.PlaywrightEndpoint = strings.TrimSpace(profile.RuntimeEndpoint)
+		}
+	}
+	return profile
+}
+
+func runtimePayloadInactiveFields() map[string]interface{} {
+	return map[string]interface{}{
+		"runtimeProtocol":      browser.RuntimeProtocolCDP,
+		"runtimeEndpoint":      "",
+		"playwrightEndpoint":   "",
+		"playwrightWsEndpoint": "",
+	}
 }
 
 func (s *LaunchServer) profileRuntimePayload(profile *browser.Profile) map[string]interface{} {
@@ -114,42 +147,71 @@ func (s *LaunchServer) profileRuntimePayload(profile *browser.Profile) map[strin
 		}
 	}
 
-	activePort, activeID, _ := s.activeTarget()
-	active := strings.TrimSpace(normalized.ProfileId) != "" && normalized.ProfileId == activeID && activePort > 0
+	target := s.activeRuntimeTarget()
+	active := strings.TrimSpace(normalized.ProfileId) != "" && normalized.ProfileId == target.ProfileID && (target.Port > 0 || strings.TrimSpace(target.Endpoint) != "")
 
 	directDebugURL := ""
 	if normalized.DebugReady && normalized.DebugPort > 0 {
 		directDebugURL = fmt.Sprintf("http://127.0.0.1:%d", normalized.DebugPort)
 	}
 
+	runtimeProtocol := browser.NormalizeRuntimeProtocol(normalized.RuntimeProtocol)
+	runtimeEndpoint := strings.TrimSpace(normalized.RuntimeEndpoint)
+	playwrightEndpoint := strings.TrimSpace(normalized.PlaywrightEndpoint)
 	cdpPort := 0
 	cdpURL := ""
 	if active {
-		cdpPort = s.Port()
-		cdpURL = s.CDPURL()
-		if cdpURL == "" && directDebugURL != "" {
-			cdpPort = normalized.DebugPort
-			cdpURL = directDebugURL
+		runtimeProtocol = browser.NormalizeRuntimeProtocol(target.Protocol)
+		if strings.TrimSpace(target.Endpoint) != "" {
+			runtimeEndpoint = target.Endpoint
+		}
+		if strings.TrimSpace(target.PlaywrightEndpoint) != "" {
+			playwrightEndpoint = target.PlaywrightEndpoint
+		}
+	}
+	if runtimeProtocol == browser.RuntimeProtocolCDP {
+		playwrightEndpoint = ""
+		if active {
+			cdpPort = s.Port()
+			cdpURL = s.CDPURL()
+			if cdpURL == "" && directDebugURL != "" {
+				cdpPort = normalized.DebugPort
+				cdpURL = directDebugURL
+			}
+			runtimeEndpoint = cdpURL
+		}
+	} else if runtimeProtocol == browser.RuntimeProtocolPlaywright {
+		cdpPort = 0
+		cdpURL = ""
+		if playwrightEndpoint == "" {
+			playwrightEndpoint = runtimeEndpoint
+		}
+		if runtimeEndpoint == "" {
+			runtimeEndpoint = playwrightEndpoint
 		}
 	}
 
 	return map[string]interface{}{
-		"ok":             true,
-		"profileId":      normalized.ProfileId,
-		"profileName":    normalized.ProfileName,
-		"launchCode":     normalized.LaunchCode,
-		"running":        normalized.Running,
-		"pid":            normalized.Pid,
-		"debugPort":      normalized.DebugPort,
-		"debugReady":     normalized.DebugReady,
-		"runtimeWarning": normalized.RuntimeWarning,
-		"lastError":      normalized.LastError,
-		"lastStartAt":    normalized.LastStartAt,
-		"lastStopAt":     normalized.LastStopAt,
-		"active":         active,
-		"cdpPort":        cdpPort,
-		"cdpUrl":         cdpURL,
-		"directDebugUrl": directDebugURL,
-		"profile":        normalized,
+		"ok":                   true,
+		"profileId":            normalized.ProfileId,
+		"profileName":          normalized.ProfileName,
+		"launchCode":           normalized.LaunchCode,
+		"running":              normalized.Running,
+		"pid":                  normalized.Pid,
+		"debugPort":            normalized.DebugPort,
+		"debugReady":           normalized.DebugReady,
+		"runtimeProtocol":      runtimeProtocol,
+		"runtimeEndpoint":      runtimeEndpoint,
+		"playwrightEndpoint":   playwrightEndpoint,
+		"playwrightWsEndpoint": playwrightEndpoint,
+		"runtimeWarning":       normalized.RuntimeWarning,
+		"lastError":            normalized.LastError,
+		"lastStartAt":          normalized.LastStartAt,
+		"lastStopAt":           normalized.LastStopAt,
+		"active":               active,
+		"cdpPort":              cdpPort,
+		"cdpUrl":               cdpURL,
+		"directDebugUrl":       directDebugURL,
+		"profile":              normalized,
 	}
 }

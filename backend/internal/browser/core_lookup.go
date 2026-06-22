@@ -52,9 +52,10 @@ func (m *Manager) ResolveCoreExecutable(core Core) (string, error) {
 	}
 
 	baseDir := m.ResolveRelativePath(corePath)
-	exePath, _, ok := FindCoreExecutable(baseDir)
+	candidates := CoreExecutableCandidatesForType(core.CoreType)
+	exePath, _, ok := FindCoreExecutableForType(baseDir, core.CoreType)
 	if !ok {
-		return "", fmt.Errorf("浏览器内核目录无效：未找到可执行文件（候选：%s）。请检查内核目录是否完整或重新下载内核", strings.Join(CoreExecutableCandidates(), ", "))
+		return "", fmt.Errorf("浏览器内核目录无效：未找到可执行文件（候选：%s）。请检查内核目录是否完整或重新下载内核", strings.Join(candidates, ", "))
 	}
 	if err := fsutil.EnsureExecutable(exePath); err != nil {
 		return "", fmt.Errorf("浏览器内核文件不可执行：%s。原因：%w。请检查文件权限或重新解压内核", exePath, err)
@@ -65,6 +66,11 @@ func (m *Manager) ResolveCoreExecutable(core Core) (string, error) {
 
 // ValidateCorePath 验证内核路径是否有效
 func (m *Manager) ValidateCorePath(corePath string) CoreValidateResult {
+	return m.ValidateCorePathForType(corePath, CoreTypeChromium)
+}
+
+// ValidateCorePathForType 验证指定类型内核路径是否有效。
+func (m *Manager) ValidateCorePathForType(corePath string, coreType string) CoreValidateResult {
 	corePath = strings.TrimSpace(corePath)
 	if corePath == "" {
 		return CoreValidateResult{Valid: false, Message: "路径不能为空"}
@@ -75,9 +81,10 @@ func (m *Manager) ValidateCorePath(corePath string) CoreValidateResult {
 	if _, err := os.Stat(baseDir); os.IsNotExist(err) {
 		return CoreValidateResult{Valid: false, Message: fmt.Sprintf("目录不存在: %s", baseDir)}
 	}
-	exePath, _, ok := FindCoreExecutable(baseDir)
+	candidates := CoreExecutableCandidatesForType(coreType)
+	exePath, _, ok := FindCoreExecutableForType(baseDir, coreType)
 	if !ok {
-		return CoreValidateResult{Valid: false, Message: fmt.Sprintf("未找到浏览器可执行文件（候选：%s）", strings.Join(CoreExecutableCandidates(), ", "))}
+		return CoreValidateResult{Valid: false, Message: fmt.Sprintf("未找到浏览器可执行文件（候选：%s）", strings.Join(candidates, ", "))}
 	}
 	if err := fsutil.ValidateExecutable(exePath); err != nil {
 		return CoreValidateResult{Valid: false, Message: fmt.Sprintf("浏览器可执行文件不可用：%v", err)}
@@ -86,14 +93,14 @@ func (m *Manager) ValidateCorePath(corePath string) CoreValidateResult {
 	return CoreValidateResult{Valid: true, Message: fmt.Sprintf("路径有效: %s", exePath)}
 }
 
-// ResolveChromeBinary 解析 Chrome 二进制路径（简化版）
-func (m *Manager) ResolveChromeBinary(profile *Profile) (string, error) {
-	log := logger.New("Browser")
+// ResolveProfileCore 解析实例实际使用的内核配置。
+func (m *Manager) ResolveProfileCore(profile *Profile) (Core, error) {
+	if profile == nil {
+		return Core{}, fmt.Errorf("实例配置为空")
+	}
 	coreId := normalizeProfileCoreID(profile.CoreId)
-
 	var core Core
 	var found bool
-
 	if coreId != "" {
 		core, found = m.GetCore(coreId)
 	}
@@ -101,7 +108,27 @@ func (m *Manager) ResolveChromeBinary(profile *Profile) (string, error) {
 		core, found = m.GetDefaultCore()
 	}
 	if !found {
-		return "", fmt.Errorf("未配置可用浏览器内核。请先在“内核管理”中添加内核并设置默认内核")
+		return Core{}, fmt.Errorf("未配置可用浏览器内核。请先在“内核管理”中添加内核并设置默认内核")
+	}
+	core.CoreType = NormalizeCoreType(core.CoreType)
+	return core, nil
+}
+
+// RuntimeProtocolForProfile 返回实例基于内核类型应使用的运行时协议。
+func (m *Manager) RuntimeProtocolForProfile(profile *Profile) string {
+	core, err := m.ResolveProfileCore(profile)
+	if err != nil {
+		return RuntimeProtocolCDP
+	}
+	return RuntimeProtocolForCoreType(core.CoreType)
+}
+
+// ResolveChromeBinary 解析 Chrome 二进制路径（简化版）
+func (m *Manager) ResolveChromeBinary(profile *Profile) (string, error) {
+	log := logger.New("Browser")
+	core, err := m.ResolveProfileCore(profile)
+	if err != nil {
+		return "", err
 	}
 
 	exePath, err := m.ResolveCoreExecutable(core)
@@ -110,6 +137,6 @@ func (m *Manager) ResolveChromeBinary(profile *Profile) (string, error) {
 		return "", err
 	}
 
-	log.Debug("使用内核", logger.F("core_id", core.CoreId), logger.F("path", exePath))
+	log.Debug("使用内核", logger.F("core_id", core.CoreId), logger.F("core_type", NormalizeCoreType(core.CoreType)), logger.F("path", exePath))
 	return exePath, nil
 }

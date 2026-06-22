@@ -142,6 +142,13 @@ var migrations = []migration{
 			`ALTER TABLE browser_bookmarks ADD COLUMN open_on_start INTEGER NOT NULL DEFAULT 0`,
 		},
 	},
+	{
+		version: 8,
+		desc:    "浏览器内核添加运行时类型",
+		stmts: []string{
+			`ALTER TABLE browser_cores ADD COLUMN core_type TEXT NOT NULL DEFAULT 'chromium'`,
+		},
+	},
 	// ── 新版本在此追加，格式：
 	// {
 	//     version: 4,

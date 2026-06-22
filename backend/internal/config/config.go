@@ -166,6 +166,7 @@ type BrowserCore struct {
 	CoreId    string `yaml:"core_id" json:"coreId"`
 	CoreName  string `yaml:"core_name" json:"coreName"`
 	CorePath  string `yaml:"core_path" json:"corePath"`
+	CoreType  string `yaml:"core_type,omitempty" json:"coreType"`
 	IsDefault bool   `yaml:"is_default" json:"isDefault"`
 }
 

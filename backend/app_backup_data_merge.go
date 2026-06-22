@@ -2,6 +2,7 @@ package backend
 
 import (
 	"ant-chrome/backend/internal/config"
+	"database/sql"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -79,6 +80,27 @@ func backupFindDatabaseFile(payloadRoot string) string {
 	return ""
 }
 
+func backupEnsureSourceDatabaseCompatibility(tx *sql.Tx) error {
+	exists, err := backupSrcTableExists(tx, "browser_cores")
+	if err != nil {
+		return fmt.Errorf("检查备份内核表失败: %w", err)
+	}
+	if !exists {
+		return nil
+	}
+	hasCoreType, err := backupSrcColumnExists(tx, "browser_cores", "core_type")
+	if err != nil {
+		return fmt.Errorf("检查备份内核表字段失败: %w", err)
+	}
+	if hasCoreType {
+		return nil
+	}
+	if _, err := tx.Exec(`ALTER TABLE src.browser_cores ADD COLUMN core_type TEXT NOT NULL DEFAULT 'chromium'`); err != nil && !strings.Contains(strings.ToLower(err.Error()), "duplicate column") {
+		return fmt.Errorf("兼容备份内核表失败: %w", err)
+	}
+	return nil
+}
+
 func (a *App) backupMergeDatabaseFromSource(srcDBPath string, resetFirst bool, stats *backupMergeStats) error {
 	if a.db == nil || a.db.GetConn() == nil {
 		return fmt.Errorf("数据库未初始化")
@@ -93,6 +115,10 @@ func (a *App) backupMergeDatabaseFromSource(srcDBPath string, resetFirst bool, s
 		return fmt.Errorf("挂载备份数据库失败: %w", err)
 	}
 	defer tx.Exec(`DETACH DATABASE src`)
+
+	if err := backupEnsureSourceDatabaseCompatibility(tx); err != nil {
+		return err
+	}
 
 	mergeTables := []struct {
 		name       string
@@ -113,10 +139,10 @@ WHERE NOT EXISTS (
 		},
 		{
 			name: "browser_cores",
-			insertAll: `INSERT INTO browser_cores (core_id, core_name, core_path, is_default, sort_order, created_at)
-SELECT core_id, core_name, core_path, is_default, sort_order, created_at FROM src.browser_cores`,
-			insertSafe: `INSERT INTO browser_cores (core_id, core_name, core_path, is_default, sort_order, created_at)
-SELECT s.core_id, s.core_name, s.core_path, s.is_default, s.sort_order, s.created_at
+			insertAll: `INSERT INTO browser_cores (core_id, core_name, core_path, core_type, is_default, sort_order, created_at)
+SELECT core_id, core_name, core_path, COALESCE(core_type,'chromium'), is_default, sort_order, created_at FROM src.browser_cores`,
+			insertSafe: `INSERT INTO browser_cores (core_id, core_name, core_path, core_type, is_default, sort_order, created_at)
+SELECT s.core_id, s.core_name, s.core_path, COALESCE(s.core_type,'chromium'), s.is_default, s.sort_order, s.created_at
 FROM src.browser_cores s
 WHERE NOT EXISTS (
   SELECT 1 FROM browser_cores t

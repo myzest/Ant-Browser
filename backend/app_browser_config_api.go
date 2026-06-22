@@ -67,6 +67,10 @@ func (a *App) BrowserCoreValidate(corePath string) BrowserCoreValidateResult {
 	return a.browserMgr.ValidateCorePath(corePath)
 }
 
+func (a *App) BrowserCoreValidateWithType(corePath string, coreType string) BrowserCoreValidateResult {
+	return a.browserMgr.ValidateCorePathForType(corePath, coreType)
+}
+
 func (a *App) BrowserCoreExtendedInfo() []BrowserCoreExtendedInfo {
 	return a.browserMgr.GetCoresExtendedInfo()
 }

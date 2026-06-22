@@ -1,6 +1,10 @@
 package backend
 
-import "fmt"
+import (
+	"ant-chrome/backend/internal/browser"
+	"fmt"
+	"strings"
+)
 
 func (a *App) BrowserInstanceStatus(profileId string) (*BrowserProfile, error) {
 	a.browserMgr.Mutex.Lock()
@@ -9,7 +13,25 @@ func (a *App) BrowserInstanceStatus(profileId string) (*BrowserProfile, error) {
 	if !exists {
 		return nil, fmt.Errorf("profile not found")
 	}
-	return profile, nil
+	snapshot := *profile
+	if snapshot.RuntimeProtocol == "" {
+		snapshot.RuntimeProtocol = a.browserMgr.RuntimeProtocolForProfile(&snapshot)
+	}
+	switch snapshot.RuntimeProtocol {
+	case browser.RuntimeProtocolCDP:
+		if snapshot.RuntimeEndpoint == "" && snapshot.DebugPort > 0 {
+			snapshot.RuntimeEndpoint = fmt.Sprintf("http://127.0.0.1:%d", snapshot.DebugPort)
+		}
+		snapshot.PlaywrightEndpoint = ""
+	case browser.RuntimeProtocolPlaywright:
+		if snapshot.RuntimeEndpoint == "" {
+			snapshot.RuntimeEndpoint = strings.TrimSpace(snapshot.PlaywrightEndpoint)
+		}
+		if snapshot.PlaywrightEndpoint == "" {
+			snapshot.PlaywrightEndpoint = strings.TrimSpace(snapshot.RuntimeEndpoint)
+		}
+	}
+	return &snapshot, nil
 }
 
 func (a *App) BrowserInstanceOpenUrl(profileId string, targetUrl string) bool {
