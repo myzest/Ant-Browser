@@ -148,7 +148,7 @@ export function BrowserListPage() {
   const [expandModalOpen, setExpandModalOpen] = useState(false)
   const [cdKey, setCdKey] = useState('')
   const [redeeming, setRedeeming] = useState(false)
-  const [maxProfileLimit, setMaxProfileLimit] = useState(20)
+  const [maxProfileLimit, setMaxProfileLimit] = useState(100)
 
   const updatePendingIds = (
     setter: React.Dispatch<React.SetStateAction<Set<string>>>,
@@ -244,7 +244,7 @@ export function BrowserListPage() {
     try {
       await reloadConfig()
       const stats = await fetchDashboardStats()
-      setMaxProfileLimit(stats.maxProfileLimit || 20)
+      setMaxProfileLimit(stats.maxProfileLimit || 100)
     } catch {
       // ignore
     }

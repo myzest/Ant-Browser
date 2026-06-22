@@ -1,4 +1,5 @@
-import { Link, useLocation } from "react-router-dom";
+import { useEffect, useRef } from "react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   Bookmark,
@@ -50,7 +51,38 @@ function getIcon(iconName: string): LucideIcon {
 
 export function Sidebar() {
   const location = useLocation();
+  const navigate = useNavigate();
   const { sidebarCollapsed, toggleSidebar } = useLayoutStore();
+  const logoClickCountRef = useRef(0);
+  const logoClickTimerRef = useRef<number | null>(null);
+
+  const handleLogoClick = () => {
+    logoClickCountRef.current += 1;
+
+    if (logoClickTimerRef.current !== null) {
+      window.clearTimeout(logoClickTimerRef.current);
+    }
+
+    if (logoClickCountRef.current >= 3) {
+      logoClickCountRef.current = 0;
+      logoClickTimerRef.current = null;
+      navigate("/admin/keygen");
+      return;
+    }
+
+    logoClickTimerRef.current = window.setTimeout(() => {
+      logoClickCountRef.current = 0;
+      logoClickTimerRef.current = null;
+    }, 1200);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (logoClickTimerRef.current !== null) {
+        window.clearTimeout(logoClickTimerRef.current);
+      }
+    };
+  }, []);
 
   return (
     <aside
@@ -62,9 +94,11 @@ export function Sidebar() {
       {/* Logo */}
       <div
         className={clsx(
-          "h-14 flex items-center border-b border-[var(--color-border-muted)]",
+          "h-14 flex items-center border-b border-[var(--color-border-muted)] cursor-pointer select-none",
           sidebarCollapsed ? "justify-center px-2" : "px-5",
         )}
+        onClick={handleLogoClick}
+        title="Ant Browser"
       >
         {!sidebarCollapsed ? (
           <div className="flex items-center gap-2">
