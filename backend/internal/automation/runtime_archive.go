@@ -51,6 +51,23 @@ func syncRunnerScript(path string) error {
 	}
 	return writeRunnerScript(path)
 }
+func writeCamoufoxLauncher(path string) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return err
+	}
+	return os.WriteFile(path, camoufoxLauncherScriptContent, 0o755)
+}
+
+func syncCamoufoxLauncher(path string) error {
+	current, err := os.ReadFile(path)
+	if err == nil && string(current) == string(camoufoxLauncherScriptContent) {
+		return nil
+	}
+	if err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	return writeCamoufoxLauncher(path)
+}
 
 func extractArchive(archivePath, destDir, format, stripPrefix string) error {
 	switch strings.TrimSpace(format) {

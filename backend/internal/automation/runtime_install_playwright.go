@@ -47,6 +47,9 @@ func (m *Manager) activateRuntimeInstall(stagingDir string, auto config.Automati
 	if err := writeRunnerScript(filepath.Join(stagingDir, runnerScriptFileName)); err != nil {
 		return fmt.Errorf("写入自动化 runner 失败: %w", err)
 	}
+	if err := writeCamoufoxLauncher(filepath.Join(stagingDir, camoufoxLauncherFileName)); err != nil {
+		return fmt.Errorf("写入 Camoufox 启动器失败: %w", err)
+	}
 
 	runtimeDir := m.runtimeDir(auto.RuntimeVersion)
 	if err := os.MkdirAll(filepath.Dir(runtimeDir), 0o755); err != nil {

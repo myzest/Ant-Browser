@@ -26,6 +26,10 @@ type browserStartPlan struct {
 	chromeBinaryPath      string
 	coreType              string
 	runtimeProtocol       string
+	camoufoxConfig        *browser.CamoufoxLaunchConfig
+	camoufoxPayloadPath   string
+	camoufoxNodePath      string
+	camoufoxLauncherPath  string
 	userDataDir           string
 	args                  []string
 	effectiveProxy        string
@@ -120,6 +124,10 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 		return nil, err
 	}
 
+	if runtimeProtocol == browser.RuntimeProtocolPlaywright {
+		return a.prepareCamoufoxStartPlan(input, profile, coreType, chromeBinaryPath, userDataDir, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs)
+	}
+
 	effectiveProxy, acquiredXrayBridgeKey, releaseXrayBridge, err := a.resolveBrowserStartProxy(input, profile)
 	if err != nil {
 		return nil, err
@@ -181,15 +189,8 @@ func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *Brow
 	}
 	coreType := browser.NormalizeCoreType(core.CoreType)
 	runtimeProtocol := browser.RuntimeProtocolForCoreType(coreType)
-	if runtimeProtocol == browser.RuntimeProtocolPlaywright {
-		startErr := fmt.Errorf("实例启动失败：Camoufox/Playwright 运行时启动器尚未配置。当前版本已支持 runtimeProtocol=playwright 的状态/API/脚本连接骨架，但不能用 Chromium 启动参数直接拉起 Camoufox；请接入 Camoufox launchServer 后再启动该内核。")
-		log.Error("Camoufox Playwright 启动器未配置", logger.F("profile_id", input.ProfileID), logger.F("core_type", coreType), logger.F("reason", startErr.Error()))
-		profile.RuntimeProtocol = runtimeProtocol
-		profile.LastError = startErr.Error()
-		return nil, nil, "", "", "", "", startErr
-	}
 
-	chromeBinaryPath, err := a.browserMgr.ResolveCoreExecutable(core)
+	corePath, err := a.browserMgr.ResolveCoreExecutable(core)
 	if err != nil {
 		startErr := fmt.Errorf("实例启动失败：%w", err)
 		log.Error("内核路径解析失败",
@@ -214,11 +215,13 @@ func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *Brow
 		return nil, nil, "", "", "", "", startErr
 	}
 
-	if err := browser.EnsureDefaultBookmarks(userDataDir, a.BookmarkList()); err != nil {
-		log.Error("默认书签写入失败", logger.F("error", err.Error()))
+	if runtimeProtocol != browser.RuntimeProtocolPlaywright {
+		if err := browser.EnsureDefaultBookmarks(userDataDir, a.BookmarkList()); err != nil {
+			log.Error("默认书签写入失败", logger.F("error", err.Error()))
+		}
 	}
 
-	if !browserRestoreLastSession(a.config) {
+	if runtimeProtocol != browser.RuntimeProtocolPlaywright && !browserRestoreLastSession(a.config) {
 		if err := browser.ClearSessionRestoreData(userDataDir); err != nil {
 			sessionDir := filepath.Join(userDataDir, "Default", "Sessions")
 			startErr := fmt.Errorf("实例启动失败：无法清理上次会话缓存 %s。原因：%w。请关闭占用该目录的浏览器进程后重试。", sessionDir, err)
@@ -233,7 +236,7 @@ func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *Brow
 		}
 	}
 
-	return sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, chromeBinaryPath, coreType, runtimeProtocol, userDataDir, nil
+	return sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, corePath, coreType, runtimeProtocol, userDataDir, nil
 }
 
 func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPort int, effectiveProxy string, sanitizedProfileLaunchArgs []string, sanitizedExtraLaunchArgs []string, startURLs []string, defaultStartURLs []string, skipDefaultStartURLs bool, restoreLastSession bool) []string {

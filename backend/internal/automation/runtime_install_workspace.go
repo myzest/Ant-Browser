@@ -21,12 +21,19 @@ func runtimeInstallNodeMode(auto config.AutomationConfig) string {
 
 func (m *Manager) tryUseReadyRuntime(ctx context.Context, nodeMode string) (bool, error) {
 	state := m.CurrentState()
-	if !state.Ready {
+	if !state.Installed {
 		return false, nil
 	}
 
 	if err := syncRunnerScript(state.RunnerPath); err != nil {
 		return false, fmt.Errorf("更新自动化 runner 失败: %w", err)
+	}
+	if err := syncCamoufoxLauncher(state.CamoufoxLauncherPath); err != nil {
+		return false, fmt.Errorf("更新 Camoufox 启动器失败: %w", err)
+	}
+	state = m.CurrentState()
+	if !state.Ready {
+		return false, nil
 	}
 
 	if !strings.EqualFold(state.NodeSource, config.AutomationNodeSourceSystem) {

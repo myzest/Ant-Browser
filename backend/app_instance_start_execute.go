@@ -1,6 +1,7 @@
 package backend
 
 import (
+	"ant-chrome/backend/internal/browser"
 	"ant-chrome/backend/internal/logger"
 	"fmt"
 	"os/exec"
@@ -9,6 +10,10 @@ import (
 )
 
 func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browserStartPlan) (*BrowserProfile, error) {
+	if plan.runtimeProtocol == browser.RuntimeProtocolPlaywright {
+		return a.startCamoufoxProfileWithPlan(input, plan)
+	}
+
 	log := logger.New("Browser")
 	profile := plan.profile
 

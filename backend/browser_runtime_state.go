@@ -97,8 +97,13 @@ func (a *App) markProfileRunningLocked(profileId string, profile *BrowserProfile
 	profile.RuntimeProtocol = browser.NormalizeRuntimeProtocol(profile.RuntimeProtocol)
 	if profile.RuntimeProtocol == browser.RuntimeProtocolCDP && debugPort > 0 {
 		profile.RuntimeEndpoint = fmt.Sprintf("http://127.0.0.1:%d", debugPort)
+		profile.PlaywrightEndpoint = ""
 	} else if profile.RuntimeProtocol == browser.RuntimeProtocolPlaywright && profile.PlaywrightEndpoint != "" {
 		profile.RuntimeEndpoint = profile.PlaywrightEndpoint
+	} else if profile.RuntimeProtocol == browser.RuntimeProtocolPlaywright {
+		// 有协议但缺 endpoint：清空避免旧值残留。
+		profile.PlaywrightEndpoint = ""
+		profile.RuntimeEndpoint = ""
 	}
 	profile.LastStartAt = time.Now().Format(time.RFC3339)
 	profile.RuntimeWarning = runtimeWarning

@@ -2,6 +2,7 @@ package backend
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	stdruntime "runtime"
 	"strings"
@@ -36,11 +37,34 @@ func (a *App) stopProcessCmd(cmd *exec.Cmd) error {
 		}
 	}
 
+	if stdruntime.GOOS != "windows" {
+		pid := cmd.Process.Pid
+		if err := cmd.Process.Signal(os.Interrupt); err == nil || isProcessAlreadyFinished(err) {
+			if waitProcessExit(pid, 3*time.Second) {
+				return nil
+			}
+		}
+	}
+
 	err := cmd.Process.Kill()
 	if err == nil || isProcessAlreadyFinished(err) {
 		return nil
 	}
 	return err
+}
+
+func waitProcessExit(pid int, timeout time.Duration) bool {
+	if pid <= 0 {
+		return true
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if !isProcessAlive(pid) {
+			return true
+		}
+		time.Sleep(150 * time.Millisecond)
+	}
+	return !isProcessAlive(pid)
 }
 
 func isProcessAlreadyFinished(err error) bool {

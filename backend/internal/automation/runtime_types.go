@@ -40,6 +40,7 @@ type RuntimeState struct {
 	RuntimeDir           string `json:"runtimeDir"`
 	NodePath             string `json:"nodePath"`
 	RunnerPath           string `json:"runnerPath"`
+	CamoufoxLauncherPath string `json:"camoufoxLauncherPath"`
 	NodeVersion          string `json:"nodeVersion"`
 	PlaywrightVersion    string `json:"playwrightVersion"`
 }
@@ -141,6 +142,7 @@ func (m *Manager) CurrentState() RuntimeState {
 
 	runtimeDir := m.runtimeDir(auto.RuntimeVersion)
 	runnerPath := m.runnerScriptPath(runtimeDir)
+	camoufoxLauncherPath := m.camoufoxLauncherPath(runtimeDir)
 	playwrightPkgPath := filepath.Join(runtimeDir, "node_modules", "playwright-core", "package.json")
 	resolvedNode := m.resolveNodeRuntime(runtimeDir, auto)
 	nodePath := strings.TrimSpace(resolvedNode.Path)
@@ -175,6 +177,7 @@ func (m *Manager) CurrentState() RuntimeState {
 		RuntimeDir:           runtimeDir,
 		NodePath:             nodePath,
 		RunnerPath:           runnerPath,
+		CamoufoxLauncherPath: camoufoxLauncherPath,
 		NodeVersion:          nodeVersion,
 		PlaywrightVersion:    playwrightVersion,
 	}
@@ -207,6 +210,11 @@ func (m *Manager) nodeExecutablePath(runtimeDir string) string {
 
 func (m *Manager) runnerScriptPath(runtimeDir string) string {
 	return filepath.Join(runtimeDir, runnerScriptFileName)
+}
+
+// camoufoxLauncherPath 返回与 runner 同目录的 Camoufox launcher 路径。
+func (m *Manager) camoufoxLauncherPath(runtimeDir string) string {
+	return filepath.Join(runtimeDir, camoufoxLauncherFileName)
 }
 
 func (m *Manager) nodeArchive(version string) (nodeArchiveSpec, error) {
