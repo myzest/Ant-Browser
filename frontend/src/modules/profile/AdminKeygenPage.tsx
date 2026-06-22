@@ -4,7 +4,7 @@ import { Card, Button, Input, Modal, toast, Textarea } from '../../shared/compon
 import { Key } from 'lucide-react'
 import { generateCDKeys } from '../dashboard/api'
 
-const ADMIN_PAGE_PASSWORD = '志字辈小蚂蚁'
+const ADMIN_PAGE_PASSWORD = 'admin'
 
 export function AdminKeygenPage() {
     const navigate = useNavigate()

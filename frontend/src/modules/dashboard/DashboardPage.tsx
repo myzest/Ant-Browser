@@ -42,7 +42,7 @@ export function DashboardPage() {
     proxyCount: 0,
     coreCount: 0,
     memUsedMB: 0,
-    maxProfileLimit: 20,
+    maxProfileLimit: 100,
     appVersion: 'unknown',
   })
   const [loading, setLoading] = useState(true)
