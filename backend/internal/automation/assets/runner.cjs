@@ -89,6 +89,12 @@ function normalizePlaywrightEndpointCandidate(value) {
   }
   try {
     const parsed = new URL(normalized);
+    if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+      if (!parsed.pathname.includes('/bridge/')) {
+        return '';
+      }
+      return parsed.toString().replace(/\/$/, '');
+    }
     if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
       return '';
     }
@@ -117,6 +123,15 @@ function buildPlaywrightEndpoints(_payload, session) {
   pushUniquePlaywrightEndpoint(candidates, seen, session && session.playwrightEndpoint);
   pushUniquePlaywrightEndpoint(candidates, seen, session && session.runtimeEndpoint);
   return candidates;
+}
+
+function isCamoufoxBridgeEndpoint(endpoint) {
+  try {
+    const parsed = new URL(String(endpoint || ''));
+    return (parsed.protocol === 'http:' || parsed.protocol === 'https:') && parsed.pathname.includes('/bridge/');
+  } catch {
+    return false;
+  }
 }
 
 function sessionRuntimeProtocol(session) {
@@ -189,6 +204,225 @@ async function requestJSON(method, requestURL, body, headers = {}) {
     }
     req.end();
   });
+}
+
+function serializeWaitForURLMatcher(matcher) {
+  if (matcher instanceof RegExp) {
+    return { type: 'regexp', source: matcher.source, flags: matcher.flags };
+  }
+  return { type: 'string', value: String(matcher || '') };
+}
+
+class CamoufoxBridgeClient {
+  constructor(endpoint) {
+    this.endpoint = String(endpoint || '').replace(/\/$/, '');
+  }
+
+  async rpc(method, params = {}) {
+    const response = await requestJSON('POST', `${this.endpoint}/rpc`, { method, params });
+    if (!(response.status >= 200 && response.status < 300) || response.body.ok === false) {
+      const errorText =
+        (response.body && response.body.error && String(response.body.error).trim()) ||
+        `camoufox bridge returned http ${response.status}`;
+      throw new Error(errorText);
+    }
+    return response.body.result || {};
+  }
+
+  pageFromWire(wire) {
+    if (!wire || !wire.id) return null;
+    return new CamoufoxBridgePage(this, wire);
+  }
+}
+
+class CamoufoxBridgeBrowser {
+  constructor(client) {
+    this._client = client;
+    this._context = new CamoufoxBridgeContext(client);
+  }
+
+  contexts() {
+    return [this._context];
+  }
+
+  async close() {
+    // Persistent context 由 launcher 生命周期托管；automation task 结束时不关闭真实浏览器。
+  }
+}
+
+class CamoufoxBridgeContext {
+  constructor(client) {
+    this._client = client;
+    this._pages = new Map();
+  }
+
+  _pageFromWire(wire) {
+    if (!wire || !wire.id) return null;
+    const id = String(wire.id);
+    const existing = this._pages.get(id);
+    if (existing) {
+      existing._update(wire);
+      if (existing.isClosed()) {
+        this._pages.delete(id);
+      }
+      return existing;
+    }
+    const page = this._client.pageFromWire(wire);
+    if (page && !page.isClosed()) {
+      this._pages.set(id, page);
+    }
+    return page;
+  }
+
+  async _wirePages() {
+    const result = await this._client.rpc('context.pages');
+    const wires = Array.isArray(result.pages) ? result.pages : [];
+    const seen = new Set();
+    const pages = [];
+    for (const wire of wires) {
+      const page = this._pageFromWire(wire);
+      if (page && !page.isClosed()) {
+        seen.add(page._id);
+        pages.push(page);
+      }
+    }
+    for (const id of Array.from(this._pages.keys())) {
+      if (!seen.has(id)) {
+        this._pages.delete(id);
+      }
+    }
+    return pages;
+  }
+
+  pages() {
+    return Array.from(this._pages.values()).filter((page) => !page.isClosed());
+  }
+
+  async newPage() {
+    const result = await this._client.rpc('context.newPage');
+    return this._pageFromWire(result.page);
+  }
+}
+
+class CamoufoxBridgeLocator {
+  constructor(page, selector, nth = undefined) {
+    this._page = page;
+    this._selector = selector;
+    this._nth = nth;
+  }
+
+  first() {
+    return new CamoufoxBridgeLocator(this._page, this._selector, 0);
+  }
+
+  nth(index) {
+    return new CamoufoxBridgeLocator(this._page, this._selector, index);
+  }
+
+  _params(extra = {}) {
+    const params = { pageId: this._page._id, selector: this._selector, ...extra };
+    if (Number.isFinite(this._nth)) {
+      params.nth = this._nth;
+    }
+    return params;
+  }
+
+  async fill(value, options = {}) {
+    await this._page._client.rpc('locator.fill', this._params({ value, options }));
+  }
+
+  async waitFor(options = {}) {
+    await this._page._client.rpc('locator.waitFor', this._params({ options }));
+  }
+
+  async press(key, options = {}) {
+    await this._page._client.rpc('locator.press', this._params({ key, options }));
+  }
+
+  async click(options = {}) {
+    await this._page._client.rpc('locator.click', this._params({ options }));
+  }
+}
+
+class CamoufoxBridgePage {
+  constructor(client, wire) {
+    this._client = client;
+    this._id = wire.id;
+    this._url = wire.url || '';
+    this._isClosed = Boolean(wire.isClosed);
+  }
+
+  _update(wire) {
+    if (!wire) return;
+    this._url = wire.url || this._url || '';
+    this._isClosed = Boolean(wire.isClosed);
+  }
+
+  url() {
+    return this._url || '';
+  }
+
+  isClosed() {
+    return this._isClosed;
+  }
+
+  locator(selector) {
+    return new CamoufoxBridgeLocator(this, selector);
+  }
+
+  async goto(url, options = {}) {
+    const result = await this._client.rpc('page.goto', { pageId: this._id, url, options });
+    this._update(result.page);
+    return null;
+  }
+
+  async waitForSelector(selector, options = {}) {
+    const result = await this._client.rpc('page.waitForSelector', { pageId: this._id, selector, options });
+    this._update(result.page);
+    return null;
+  }
+
+  async waitForTimeout(ms) {
+    const result = await this._client.rpc('page.waitForTimeout', { pageId: this._id, ms });
+    this._update(result.page);
+  }
+
+  async waitForURL(matcher, options = {}) {
+    const result = await this._client.rpc('page.waitForURL', {
+      pageId: this._id,
+      matcher: serializeWaitForURLMatcher(matcher),
+      options,
+    });
+    this._update(result.page);
+  }
+
+  async title() {
+    const result = await this._client.rpc('page.title', { pageId: this._id });
+    this._update(result.page);
+    return result.value || '';
+  }
+
+  async screenshot(options = {}) {
+    const result = await this._client.rpc('page.screenshot', { pageId: this._id, options });
+    this._update(result.page);
+    return result.value ? Buffer.from(result.value, 'base64') : Buffer.alloc(0);
+  }
+
+  async close(options = {}) {
+    const result = await this._client.rpc('page.close', { pageId: this._id, options });
+    this._update(result.page || { isClosed: true });
+  }
+
+  async $$eval(selector, pageFunction, arg) {
+    const result = await this._client.rpc('page.$$eval', {
+      pageId: this._id,
+      selector,
+      functionSource: typeof pageFunction === 'function' ? pageFunction.toString() : String(pageFunction || ''),
+      arg,
+    });
+    this._update(result.page);
+    return result.value;
+  }
 }
 
 function inspectValue(value) {
@@ -436,9 +670,6 @@ async function runScriptTask(payload, playwright) {
   };
 
   const connectPlaywright = async (session = {}) => {
-    if (!playwright || !playwright.firefox || typeof playwright.firefox.connect !== 'function') {
-      throw new Error('当前 Playwright runtime 缺少 firefox.connect 能力，无法接管 Camoufox/Playwright 实例；请确认自动化运行时已安装 firefox 浏览器或切换为 CDP 协议脚本');
-    }
     const endpoints = buildPlaywrightEndpoints(payload, session);
     if (endpoints.length === 0) {
       throw new Error(
@@ -455,6 +686,29 @@ async function runScriptTask(payload, playwright) {
         const remaining = deadline - Date.now();
         if (remaining <= 0) break;
         try {
+          if (isCamoufoxBridgeEndpoint(endpoint)) {
+            const client = new CamoufoxBridgeClient(endpoint);
+            await client.rpc('context.pages');
+            const browser = new CamoufoxBridgeBrowser(client);
+            const context = browser.contexts()[0];
+            const pages = await context._wirePages();
+            const page = pages.length > 0 ? pages[0] : await context.newPage();
+            return {
+              browser,
+              context,
+              page,
+              session: {
+                ...session,
+                runtimeProtocol: 'playwright',
+                runtimeEndpoint: endpoint,
+                playwrightEndpoint: endpoint,
+                playwrightWsEndpoint: '',
+              },
+            };
+          }
+          if (!playwright || !playwright.firefox || typeof playwright.firefox.connect !== 'function') {
+            throw new Error('当前 Playwright runtime 缺少 firefox.connect 能力，无法接管 Camoufox/Playwright 实例；请确认自动化运行时已安装 firefox 浏览器或切换为 CDP 协议脚本');
+          }
           const browser = await playwright.firefox.connect(endpoint, {
             timeout: Math.max(1000, Math.min(remaining, timeout)),
           });

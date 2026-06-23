@@ -327,6 +327,130 @@ func TestRunScriptTaskFallsBackToLaunchBaseURLWhenSessionEndpointIsInvalid(t *te
 	}
 }
 
+func TestRunScriptTaskConnectsCamoufoxBridgeEndpoint(t *testing.T) {
+	nodeExecPath := lookupNodeExecutable(t)
+
+	cfg := config.DefaultConfig()
+	cfg.Automation.Enabled = true
+	cfg.Automation.NodeSource = config.AutomationNodeSourceSystem
+	cfg.Automation.SystemNodePath = nodeExecPath
+	cfg.Automation.NodeVersion = "test-node"
+	cfg.Automation.PlaywrightCoreVersion = "1.59.0"
+	cfg.Automation.RuntimeVersion = "test-runtime"
+
+	manager := NewManager(t.TempDir(), cfg, nil, Options{})
+
+	state := manager.CurrentState()
+	if err := writeRunnerScript(state.RunnerPath); err != nil {
+		t.Fatalf("write runner script failed: %v", err)
+	}
+	if err := writeMockPlaywrightModule(state.RuntimeDir, cfg.Automation.PlaywrightCoreVersion); err != nil {
+		t.Fatalf("write mock playwright module failed: %v", err)
+	}
+
+	bridgeEndpoint := ""
+	bridgeCalls := []string{}
+	bridge := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/bridge/test/rpc" {
+			http.NotFound(w, r)
+			return
+		}
+		var body struct {
+			Method string         `json:"method"`
+			Params map[string]any `json:"params"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode bridge request failed: %v", err)
+		}
+		bridgeCalls = append(bridgeCalls, body.Method)
+		w.Header().Set("Content-Type", "application/json")
+		switch body.Method {
+		case "context.pages":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"pages": []map[string]any{{"id": "page-1", "url": "about:blank", "isClosed": false}}}})
+		case "page.goto":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"page": map[string]any{"id": "page-1", "url": body.Params["url"], "isClosed": false}}})
+		case "page.title":
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "result": map[string]any{"value": "Bridge Title", "page": map[string]any{"id": "page-1", "url": "https://example.test", "isClosed": false}}})
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "unexpected method: " + body.Method})
+		}
+	}))
+	defer bridge.Close()
+	bridgeEndpoint = bridge.URL + "/bridge/test"
+
+	launchServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/api/launch" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":                   true,
+			"profileId":            "profile-camoufox",
+			"runtimeProtocol":      "playwright",
+			"runtimeEndpoint":      bridgeEndpoint,
+			"playwrightEndpoint":   bridgeEndpoint,
+			"playwrightWsEndpoint": bridgeEndpoint,
+		})
+	}))
+	defer launchServer.Close()
+
+	scriptDir := filepath.Join(state.RuntimeDir, "tmp", "scripts")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("create script dir failed: %v", err)
+	}
+	scriptPath := filepath.Join(scriptDir, "script-camoufox-bridge.cjs")
+	scriptSource := `module.exports.run = async ({ launch, connect, selector, params }) => {
+  const session = await launch({ selector })
+  const connection = await connect(session)
+  const page = connection.page || await connection.context.newPage()
+  await page.goto(params.url)
+  return {
+    ok: true,
+    summary: 'bridge ok',
+    title: await page.title(),
+    url: page.url(),
+    runtimeEndpoint: connection.session.runtimeEndpoint,
+    playwrightWsEndpoint: connection.session.playwrightWsEndpoint,
+  }
+}`
+	if err := os.WriteFile(scriptPath, []byte(scriptSource), 0o644); err != nil {
+		t.Fatalf("write script failed: %v", err)
+	}
+
+	result, err := manager.RunScriptTask(context.Background(), ScriptTaskRequest{
+		TaskKey:       "script:camoufox-bridge",
+		ScriptPath:    scriptPath,
+		Selector:      map[string]any{"code": "CAMOUFOX"},
+		Params:        map[string]any{"url": "https://example.test"},
+		LaunchBaseURL: launchServer.URL,
+	})
+	if err != nil {
+		t.Fatalf("RunScriptTask returned error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected script task to succeed, got %+v", result)
+	}
+	if result.Summary != "bridge ok" {
+		t.Fatalf("unexpected summary: %s", result.Summary)
+	}
+	if !strings.Contains(result.ResultText, `"title":"Bridge Title"`) {
+		t.Fatalf("expected result text to contain bridge title, got %s", result.ResultText)
+	}
+	if !strings.Contains(result.ResultText, `"runtimeEndpoint":"`+bridgeEndpoint+`"`) {
+		t.Fatalf("expected result text to contain bridge endpoint, got %s", result.ResultText)
+	}
+	if !strings.Contains(result.ResultText, `"playwrightWsEndpoint":""`) {
+		t.Fatalf("expected bridge connection to clear playwrightWsEndpoint, got %s", result.ResultText)
+	}
+	joinedCalls := strings.Join(bridgeCalls, ",")
+	if !strings.Contains(joinedCalls, "context.pages") || !strings.Contains(joinedCalls, "page.goto") || !strings.Contains(joinedCalls, "page.title") {
+		t.Fatalf("unexpected bridge calls: %v", bridgeCalls)
+	}
+}
+
 func TestRunScriptTaskClosesBrowserConnections(t *testing.T) {
 	nodeExecPath := lookupNodeExecutable(t)
 

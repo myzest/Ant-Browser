@@ -234,20 +234,30 @@ const CAMOUFOX_STATUS_MAP: Record<FingerprintFieldKey, FingerprintCapabilityStat
   brand: 'unsupported',
   platform: 'partial',
   lang: 'supported',
-  timezone: 'partial',
+  timezone: 'supported',
   resolution: 'supported',
-  colorDepth: 'partial',
-  hardwareConcurrency: 'partial',
+  colorDepth: 'supported',
+  hardwareConcurrency: 'supported',
   deviceMemory: 'partial',
   canvasNoise: 'partial',
   webglVendor: 'partial',
   webglRenderer: 'partial',
   audioNoise: 'partial',
-  fonts: 'partial',
+  fonts: 'supported',
   webrtcPolicy: 'partial',
-  doNotTrack: 'partial',
+  doNotTrack: 'supported',
   mediaDevices: 'partial',
-  touchPoints: 'partial',
+  touchPoints: 'supported',
+}
+
+const CAMOUFOX_NOTE_OVERRIDES: Partial<Record<FingerprintFieldKey, string>> = {
+  timezone: '已写入 CAMOU_CONFIG timezone，交由 Camoufox runtime 应用',
+  colorDepth: '已同步写入 screen.colorDepth 与 screen.pixelDepth',
+  hardwareConcurrency: '已写入 navigator.hardwareConcurrency',
+  deviceMemory: '已写入 navigator.deviceMemory；页面可见性依赖 Firefox/Camoufox 支持',
+  doNotTrack: '已写入 navigator.doNotTrack',
+  touchPoints: '已写入 navigator.maxTouchPoints',
+  fonts: '已写入 Camoufox runtime 字体列表',
 }
 
 const DEFAULT_STATUS_MAP: Record<FingerprintFieldKey, FingerprintCapabilityStatus> = {
@@ -300,6 +310,15 @@ function getCapabilityStatus(coreType?: string, key?: FingerprintFieldKey): Fing
   if (runtime === 'chromium') return CHROMIUM_STATUS_MAP[key]
   if (runtime === 'camoufox') return CAMOUFOX_STATUS_MAP[key]
   return DEFAULT_STATUS_MAP[key]
+}
+
+function getCapabilityNote(coreType: string | undefined, item: CapabilityDefinition): string {
+  const runtime = normalizeCoreRuntime(coreType)
+  if (runtime === 'camoufox') {
+    const note = CAMOUFOX_NOTE_OVERRIDES[item.key]
+    if (note) return note
+  }
+  return item.notes[getCapabilityStatus(coreType, item.key)]
 }
 
 function asTrimmedString(value: unknown): string {
@@ -420,15 +439,18 @@ export function buildFingerprintCapabilityMatrix(
 ): FingerprintCapabilityItem[] {
   const recommendedConfig = recommendationToConfig(recommendation)
 
-  return CAPABILITY_DEFINITIONS.map((item) => ({
-    key: item.key,
-    label: item.label,
-    group: item.group,
-    status: getCapabilityStatus(coreType, item.key),
-    currentValue: formatFingerprintValue(currentConfig, item.key) || '未设置',
-    recommendedValue: formatFingerprintValue(recommendedConfig, item.key) || undefined,
-    note: item.notes[getCapabilityStatus(coreType, item.key)],
-  }))
+  return CAPABILITY_DEFINITIONS.map((item) => {
+    const status = getCapabilityStatus(coreType, item.key)
+    return {
+      key: item.key,
+      label: item.label,
+      group: item.group,
+      status,
+      currentValue: formatFingerprintValue(currentConfig, item.key) || '未设置',
+      recommendedValue: formatFingerprintValue(recommendedConfig, item.key) || undefined,
+      note: getCapabilityNote(coreType, item),
+    }
+  })
 }
 
 export function buildFingerprintRecommendation(
@@ -452,7 +474,7 @@ export function buildFingerprintRecommendation(
       CAPABILITY_DEFINITIONS.map(item => [item.key, getCapabilityStatus(request.coreType, item.key)]),
     ) as Partial<Record<FingerprintFieldKey, FingerprintCapabilityStatus>>,
     capabilityNotes: Object.fromEntries(
-      CAPABILITY_DEFINITIONS.map(item => [item.key, item.notes[getCapabilityStatus(request.coreType, item.key)]]),
+      CAPABILITY_DEFINITIONS.map(item => [item.key, getCapabilityNote(request.coreType, item)]),
     ) as Partial<Record<FingerprintFieldKey, string>>,
   }
 }

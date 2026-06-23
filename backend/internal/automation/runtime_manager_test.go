@@ -433,6 +433,9 @@ func TestEnsureInstalledRefreshesExistingRunnerScript(t *testing.T) {
 	if err := os.WriteFile(state.RunnerPath, []byte("old-runner"), 0o755); err != nil {
 		t.Fatalf("write stale runner failed: %v", err)
 	}
+	if err := os.WriteFile(state.CamoufoxLauncherPath, []byte("old-camoufox-launcher"), 0o755); err != nil {
+		t.Fatalf("write stale camoufox launcher failed: %v", err)
+	}
 
 	if err := manager.EnsureInstalled(context.Background()); err != nil {
 		t.Fatalf("EnsureInstalled returned error: %v", err)
@@ -444,6 +447,14 @@ func TestEnsureInstalledRefreshesExistingRunnerScript(t *testing.T) {
 	}
 	if string(runnerData) != string(runnerScriptContent) {
 		t.Fatalf("expected runner script to be refreshed")
+	}
+
+	camoufoxLauncherData, err := os.ReadFile(state.CamoufoxLauncherPath)
+	if err != nil {
+		t.Fatalf("read refreshed camoufox launcher failed: %v", err)
+	}
+	if string(camoufoxLauncherData) != string(camoufoxLauncherScriptContent) {
+		t.Fatalf("expected camoufox launcher script to be refreshed")
 	}
 }
 

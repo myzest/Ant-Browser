@@ -220,7 +220,7 @@ func (a *App) startCamoufoxProfileWithPlan(input browserStartInput, plan *browse
 		return profile, startErr
 	}
 
-	wsEndpoint, readyErr := waitForCamoufoxReady(readyCtx, stdoutPipe, plan.totalReadyTimeout)
+	runtimeEndpoint, readyErr := waitForCamoufoxReady(readyCtx, stdoutPipe, plan.totalReadyTimeout)
 	if readyErr != nil {
 		_ = killCamoufoxProcess(cmd)
 		startErr := fmt.Errorf("实例启动失败：%w", readyErr)
@@ -256,8 +256,8 @@ func (a *App) startCamoufoxProfileWithPlan(input browserStartInput, plan *browse
 		if profile.RuntimeProtocol == "" {
 			profile.RuntimeProtocol = browser.RuntimeProtocolPlaywright
 		}
-		profile.PlaywrightEndpoint = wsEndpoint
-		profile.RuntimeEndpoint = wsEndpoint
+		profile.PlaywrightEndpoint = runtimeEndpoint
+		profile.RuntimeEndpoint = runtimeEndpoint
 	}
 
 	a.markProfileRunningLocked(input.ProfileID, profile, cmd, pid, 0, true, "")
@@ -272,19 +272,19 @@ func (a *App) startCamoufoxProfileWithPlan(input browserStartInput, plan *browse
 		logger.F("os", plan.camoufoxConfig.OSName),
 		logger.F("pid", pid),
 		logger.F("proxy", plan.effectiveProxy),
-		logger.F("ws_endpoint", wsEndpoint),
+		logger.F("runtime_endpoint", runtimeEndpoint),
 	)
 
 	a.emitBrowserInstanceStarted(profile, false)
 
 	// 后台监管 launcher 子进程退出
-	go a.waitCamoufoxLauncherProcess(input.ProfileID, cmd, wsEndpoint)
+	go a.waitCamoufoxLauncherProcess(input.ProfileID, cmd, runtimeEndpoint)
 
 	return profile, nil
 }
 
 // waitCamoufoxLauncherProcess 会在 launcher 子进程退出时把 profile 标记为已停止。
-func (a *App) waitCamoufoxLauncherProcess(profileID string, cmd *exec.Cmd, wsEndpoint string) {
+func (a *App) waitCamoufoxLauncherProcess(profileID string, cmd *exec.Cmd, runtimeEndpoint string) {
 	_ = cmd.Wait()
 	profileName := profileID
 	stoppedByMonitor := false
@@ -292,7 +292,7 @@ func (a *App) waitCamoufoxLauncherProcess(profileID string, cmd *exec.Cmd, wsEnd
 	profile, exists := a.browserMgr.Profiles[profileID]
 	if exists && profile != nil {
 		profileName = profile.ProfileName
-		if profile.PlaywrightEndpoint == wsEndpoint {
+		if profile.PlaywrightEndpoint == runtimeEndpoint {
 			a.markProfileStoppedLocked(profileID, profile)
 			stoppedByMonitor = true
 		}
@@ -305,7 +305,7 @@ func (a *App) waitCamoufoxLauncherProcess(profileID string, cmd *exec.Cmd, wsEnd
 	}
 }
 
-// waitForCamoufoxReady 从 launcher stdout 逐行读取直到匹配 CAMOUFOX_READY <wsEndpoint>，
+// waitForCamoufoxReady 从 launcher stdout 逐行读取直到匹配 CAMOUFOX_READY <runtimeEndpoint>，
 // 或收到 CAMOUFOX_FAIL <msg> 与超时。 出错时把 stderr 带回上层。
 func waitForCamoufoxReady(ctx context.Context, stdout io.Reader, timeout time.Duration) (string, error) {
 	readyC := make(chan string, 1)
@@ -332,11 +332,11 @@ func waitForCamoufoxReady(ctx context.Context, stdout io.Reader, timeout time.Du
 	}()
 
 	select {
-	case ws := <-readyC:
-		if strings.TrimSpace(ws) == "" {
-			return "", fmt.Errorf("Camoufox launcher 返回空的 wsEndpoint")
+	case endpoint := <-readyC:
+		if strings.TrimSpace(endpoint) == "" {
+			return "", fmt.Errorf("Camoufox launcher 返回空的 runtimeEndpoint")
 		}
-		return ws, nil
+		return endpoint, nil
 	case msg := <-errC:
 		return "", fmt.Errorf("%s", msg)
 	case <-time.After(timeout):

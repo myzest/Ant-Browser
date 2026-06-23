@@ -6,7 +6,7 @@ package browser
  *   1. 从内嵌指纹池取一条 (navigator/screen/window/WebGL/canvas/fonts 已生成)
  *   2. 应用 Ant FingerprintArgs 覆盖：--user-agent / --lang / --window-size 等
  *   3. JSON 序列化 + 按 OS 分块 -> CAMOU_CONFIG_1 / CAMOU_CONFIG_2 / ...
- *   4. 交给 Node launcher 用 playwright-core.firefox.launchServer 拉起 Camoufox 二进制
+ *   4. 交给 Node launcher 用 playwright-core.firefox.launchPersistentContext 拉起 Camoufox 二进制
  *
  * 分块规则对照 camoufox/utils.py:get_env_vars：
  *   windows -> 2047 字节
@@ -24,7 +24,7 @@ import (
 type CamoufoxLaunchConfig struct {
 	// Camoufox Firefox 可执行文件绝对路径。
 	ExecutablePath string `json:"executablePath"`
-	// 持久化用户数据目录，以 Firefox -profile 形式透传。
+	// 实例用户数据目录；launcher 以 launchPersistentContext(userDataDir, options) 使用。
 	UserDataDir string `json:"userDataDir"`
 	// 是否无头。
 	Headless bool `json:"headless"`
@@ -160,12 +160,15 @@ func normalizeCamoufoxExtraArgs(args []string) []string {
 		switch {
 		case keyLower == "--user-agent",
 			keyLower == "--accept-language",
+			keyLower == "--accept-lang",
 			keyLower == "--lang",
+			keyLower == "--timezone",
 			keyLower == "--window-size",
 			keyLower == "--user-data-dir",
+			keyLower == "--profile",
+			keyLower == "-profile",
 			keyLower == "--fingerprint",
-			keyLower == "--fingerprint-platform",
-			keyLower == "--fingerprint-brand",
+			strings.HasPrefix(keyLower, "--fingerprint-"),
 			keyLower == "--remote-debugging-port",
 			keyLower == "--remote-debugging-address",
 			keyLower == "--remote-debugging-pipe",
@@ -204,7 +207,14 @@ func normalizeStringList(args []string) []string {
 //
 //	--user-agent=UA            -> navigator.userAgent + headers.User-Agent + 按 UA 推断并同步 oscpu/platform
 //	--lang=xx 或 --accept-lang -> navigator.language/languages + headers.Accept-Language
+//	--timezone=Area/City       -> timezone
 //	--window-size=W,H          -> window.outerWidth/outerHeight
+//	--fingerprint-color-depth=N -> screen.colorDepth + screen.pixelDepth
+//	--fingerprint-hardware-concurrency=N -> navigator.hardwareConcurrency
+//	--fingerprint-device-memory=N -> navigator.deviceMemory
+//	--fingerprint-do-not-track=true/false -> navigator.doNotTrack
+//	--fingerprint-touch-points=N -> navigator.maxTouchPoints
+//	--fingerprint-fonts=A,B     -> fonts
 //	--user-data-dir=...        -> 跳过（由 BuildCamoufoxLaunchConfig 顶层 userDataDir 统管）
 //	--fingerprint-platform=... -> 跳过（已在 targetOS 决定时处理）
 //	--fingerprint-brand=Chrome -> 忽略 (Firefox 不适用)
@@ -213,9 +223,10 @@ func normalizeStringList(args []string) []string {
 //	--proxy-server=...         -> 跳过 (由顶层 proxy 统管)
 //	其它 Firefox 能识别的 CLI 不在此覆盖 config，由 Node launcher 透传 args
 func applyCamoufoxFingerprintOverrides(config map[string]any, fingerprintArgs []string) {
-	for _, raw := range fingerprintArgs {
+	args := normalizeStringList(fingerprintArgs)
+	for i := 0; i < len(args); i++ {
+		raw := args[i]
 		arg := strings.TrimSpace(raw)
-		// 只处理 --key=value 形式
 		if !strings.HasPrefix(arg, "--") {
 			continue
 		}
@@ -224,6 +235,12 @@ func applyCamoufoxFingerprintOverrides(config map[string]any, fingerprintArgs []
 		if idx := strings.IndexByte(arg, '='); idx >= 0 {
 			key = arg[:idx]
 			value = arg[idx+1:]
+		} else if camoufoxOverrideTakesValue(key) && i+1 < len(args) {
+			next := strings.TrimSpace(args[i+1])
+			if next != "" && !strings.HasPrefix(next, "-") {
+				value = next
+				i++
+			}
 		}
 		switch {
 		case key == "--user-agent":
@@ -240,7 +257,7 @@ func applyCamoufoxFingerprintOverrides(config map[string]any, fingerprintArgs []
 			if platform != "" {
 				config["navigator.platform"] = platform
 			}
-		case key == "--accept-language", key == "--lang":
+		case key == "--accept-language", key == "--accept-lang", key == "--lang":
 			langs := normalizeAcceptLanguage(value)
 			if len(langs) == 0 {
 				continue
@@ -280,6 +297,52 @@ func applyCamoufoxFingerprintOverrides(config map[string]any, fingerprintArgs []
 			if h > 100 {
 				config["screen.availHeight"] = h - 40
 			}
+		case key == "--timezone":
+			if value == "" {
+				continue
+			}
+			config["timezone"] = value
+		case key == "--fingerprint-color-depth":
+			depth, ok := parsePositiveInt(value)
+			if !ok {
+				continue
+			}
+			config["screen.colorDepth"] = depth
+			config["screen.pixelDepth"] = depth
+		case key == "--fingerprint-hardware-concurrency":
+			cores, ok := parsePositiveInt(value)
+			if !ok {
+				continue
+			}
+			config["navigator.hardwareConcurrency"] = cores
+		case key == "--fingerprint-device-memory":
+			memory, ok := parsePositiveInt(value)
+			if !ok {
+				continue
+			}
+			config["navigator.deviceMemory"] = memory
+		case key == "--fingerprint-do-not-track":
+			enabled, ok := parseBoolFlag(value)
+			if !ok {
+				continue
+			}
+			if enabled {
+				config["navigator.doNotTrack"] = "1"
+			} else {
+				config["navigator.doNotTrack"] = "0"
+			}
+		case key == "--fingerprint-touch-points":
+			points, ok := parseNonNegativeInt(value)
+			if !ok {
+				continue
+			}
+			config["navigator.maxTouchPoints"] = points
+		case key == "--fingerprint-fonts":
+			fonts := normalizeCommaList(value)
+			if len(fonts) == 0 {
+				continue
+			}
+			config["fonts"] = fonts
 		case strings.HasPrefix(key, "--user-data-dir"),
 			strings.HasPrefix(key, "--fingerprint-platform"),
 			strings.HasPrefix(key, "--fingerprint-brand"),
@@ -298,6 +361,26 @@ func applyCamoufoxFingerprintOverrides(config map[string]any, fingerprintArgs []
 	}
 }
 
+func camoufoxOverrideTakesValue(key string) bool {
+	switch key {
+	case "--user-agent",
+		"--accept-language",
+		"--accept-lang",
+		"--lang",
+		"--window-size",
+		"--timezone",
+		"--fingerprint-color-depth",
+		"--fingerprint-hardware-concurrency",
+		"--fingerprint-device-memory",
+		"--fingerprint-do-not-track",
+		"--fingerprint-touch-points",
+		"--fingerprint-fonts":
+		return true
+	default:
+		return false
+	}
+}
+
 // parseWindowWH 解析 "--window-size=1280,800" 形式。
 func parseWindowWH(value string) (int, int, bool) {
 	parts := strings.Split(value, ",")
@@ -313,6 +396,52 @@ func parseWindowWH(value string) (int, int, bool) {
 		return 0, 0, false
 	}
 	return w, h, true
+}
+
+func parsePositiveInt(value string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n <= 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func parseNonNegativeInt(value string) (int, bool) {
+	n, err := strconv.Atoi(strings.TrimSpace(value))
+	if err != nil || n < 0 {
+		return 0, false
+	}
+	return n, true
+}
+
+func parseBoolFlag(value string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "1", "true", "yes", "on", "enable", "enabled":
+		return true, true
+	case "0", "false", "no", "off", "disable", "disabled":
+		return false, true
+	default:
+		return false, false
+	}
+}
+
+func normalizeCommaList(value string) []string {
+	parts := strings.Split(value, ",")
+	out := make([]string, 0, len(parts))
+	seen := map[string]struct{}{}
+	for _, part := range parts {
+		item := strings.TrimSpace(part)
+		if item == "" {
+			continue
+		}
+		key := strings.ToLower(item)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, item)
+	}
+	return out
 }
 
 // normalizeAcceptLanguage 把 "zh-CN,zh;q=0.9,en" 或 "zh-CN" 转换成语言标签列表。
