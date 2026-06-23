@@ -16,7 +16,11 @@ func Validate(profile *Profile) []ValidationIssue {
 func ValidateArgs(args []string) []ValidationIssue {
 	values := ParseArgs(args)
 	issues := make([]ValidationIssue, 0)
-	platform := NormalizePlatform(values["--fingerprint-platform"])
+	rawPlatform := strings.TrimSpace(values["--fingerprint-platform"])
+	platform := NormalizePlatform(rawPlatform)
+	if rawPlatform == "" {
+		issues = append(issues, issue("missing_platform", "yellow", "--fingerprint-platform", "缺少浏览器平台"))
+	}
 	brand := values["--fingerprint-brand"]
 	if brand == "" {
 		issues = append(issues, issue("missing_brand", "yellow", "--fingerprint-brand", "缺少浏览器品牌"))
@@ -95,7 +99,85 @@ func ValidateArgs(args []string) []ValidationIssue {
 			issues = append(issues, issue("invalid_webrtc_ip", "red", "--fingerprint-webrtc-ip", "WebRTC IP 不是合法 IP 地址"))
 		}
 	}
+	issues = append(issues, validateRiskyLaunchArgs(args)...)
 	return issues
+}
+
+func validateRiskyLaunchArgs(args []string) []ValidationIssue {
+	issues := make([]ValidationIssue, 0)
+	seen := map[string]struct{}{}
+	for i := 0; i < len(args); i++ {
+		key, value, consumed := splitLaunchArg(args, i)
+		if key == "" {
+			continue
+		}
+		if consumed {
+			i++
+		}
+
+		code := ""
+		message := ""
+		switch key {
+		case "--headless":
+			code = "risky_headless"
+			message = "包含 headless 启动参数，外部检测站可能识别为自动化环境"
+		case "--disable-gpu":
+			code = "risky_disable_gpu"
+			message = "包含禁用 GPU 参数，可能造成渲染栈异常"
+		case "--no-sandbox":
+			code = "risky_no_sandbox"
+			message = "包含 no-sandbox 参数，可能暴露异常运行环境"
+		case "--disable-web-security":
+			code = "risky_disable_web_security"
+			message = "包含禁用 Web 安全参数，可能暴露调试/篡改环境"
+		case "--remote-debugging-port", "--remote-debugging-pipe":
+			code = "risky_remote_debugging"
+			message = "包含远程调试参数，外部检测站可能识别到 DevTools/CDP 环境"
+		case "--enable-automation":
+			code = "risky_enable_automation"
+			message = "包含 Chromium 自动化标记，容易被识别为自动化环境"
+		case "--disable-blink-features":
+			if strings.Contains(value, "automationcontrolled") {
+				code = "risky_automation_controlled_override"
+				message = "包含 AutomationControlled 覆盖参数，可能触发自动化/篡改启发式检测"
+			}
+		case "--use-gl", "--use-angle":
+			if strings.Contains(value, "swiftshader") {
+				code = "risky_swiftshader"
+				message = "包含 SwiftShader 渲染参数，可能造成 WebGL/GPU 指纹异常"
+			}
+		}
+		if code == "" {
+			continue
+		}
+		if _, ok := seen[code]; ok {
+			continue
+		}
+		seen[code] = struct{}{}
+		issues = append(issues, issue(code, "yellow", key, message))
+	}
+	return issues
+}
+
+func splitLaunchArg(args []string, index int) (string, string, bool) {
+	if index < 0 || index >= len(args) {
+		return "", "", false
+	}
+	arg := strings.TrimSpace(args[index])
+	if !strings.HasPrefix(arg, "--") {
+		return "", "", false
+	}
+	if key, value, ok := strings.Cut(arg, "="); ok {
+		return strings.ToLower(strings.TrimSpace(key)), strings.ToLower(strings.TrimSpace(value)), false
+	}
+	key := strings.ToLower(arg)
+	if index+1 < len(args) {
+		next := strings.TrimSpace(args[index+1])
+		if next != "" && !strings.HasPrefix(next, "-") {
+			return key, strings.ToLower(next), true
+		}
+	}
+	return key, "", false
 }
 
 func parseStrictPair(value string) (int, int, bool) {

@@ -64,6 +64,53 @@ func TestValidateArgsDetectsMismatches(t *testing.T) {
 	}
 }
 
+func TestValidateArgsWarnsMissingPlatform(t *testing.T) {
+	t.Parallel()
+
+	report := Health([]string{
+		"--fingerprint-brand=Chrome",
+		"--fingerprint-fonts=Arial,Calibri",
+		"--fingerprint-webgl-vendor=Intel",
+		"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+	})
+	if report.Status != "yellow" {
+		t.Fatalf("expected yellow health report for missing platform, got %#v", report)
+	}
+	if !hasIssue(report, "missing_platform") {
+		t.Fatalf("expected missing_platform issue, got %#v", report.Issues)
+	}
+}
+
+func TestValidateArgsWarnsRiskyLaunchArgs(t *testing.T) {
+	t.Parallel()
+
+	report := Health([]string{
+		"--fingerprint-brand=Chrome",
+		"--fingerprint-platform=windows",
+		"--fingerprint-fonts=Arial,Calibri",
+		"--fingerprint-webgl-vendor=Intel",
+		"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+		"--headless=new",
+		"--remote-debugging-port",
+		"9222",
+		"--disable-blink-features=AutomationControlled",
+		"--use-gl=swiftshader",
+	})
+	if report.Status != "yellow" {
+		t.Fatalf("expected yellow health report for risky launch args, got %#v", report)
+	}
+	for _, code := range []string{
+		"risky_headless",
+		"risky_remote_debugging",
+		"risky_automation_controlled_override",
+		"risky_swiftshader",
+	} {
+		if !hasIssue(report, code) {
+			t.Fatalf("expected issue %q, got %#v", code, report.Issues)
+		}
+	}
+}
+
 func TestValidateArgsDetectsMalformedNumericValues(t *testing.T) {
 	t.Parallel()
 

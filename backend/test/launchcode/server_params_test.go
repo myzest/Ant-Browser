@@ -140,6 +140,54 @@ func TestLaunchWithTemporaryProxyParams(t *testing.T) {
 	}
 }
 
+func TestLaunchDoesNotExposeCDPURLBeforeDebugReady(t *testing.T) {
+	svc := newInMemoryService()
+	starter := newMockStarterWithParams()
+	starter.addProfile(&browser.Profile{
+		ProfileId:      "profile-debug-pending",
+		ProfileName:    "debug-pending",
+		Running:        true,
+		Pid:            333,
+		DebugPort:      9777,
+		DebugReady:     false,
+		RuntimeWarning: "debug pending",
+	})
+
+	code, err := svc.EnsureCode("profile-debug-pending")
+	if err != nil {
+		t.Fatalf("EnsureCode 失败: %v", err)
+	}
+
+	srv := launchcode.NewLaunchServer(svc, starter, nil, 18088)
+	handler := launchcode.NewTestHandler(srv)
+	payload, _ := json.Marshal(map[string]interface{}{"code": code})
+	req := httptest.NewRequest(http.MethodPost, "/api/launch", bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("期望 200，实际 %d，body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		OK         bool   `json:"ok"`
+		DebugPort  int    `json:"debugPort"`
+		DebugReady bool   `json:"debugReady"`
+		CDPPort    int    `json:"cdpPort"`
+		CDPURL     string `json:"cdpUrl"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if !resp.OK || resp.DebugReady || resp.DebugPort != 9777 {
+		t.Fatalf("调试状态响应不正确: %+v", resp)
+	}
+	if resp.CDPPort != 0 || resp.CDPURL != "" {
+		t.Fatalf("调试未就绪时不应返回 CDP 地址: %+v", resp)
+	}
+}
+
 func TestLaunchWithParamsUsingCodeAsKeywordFallback(t *testing.T) {
 	svc := newInMemoryService()
 	starter := newMockStarterWithParams()

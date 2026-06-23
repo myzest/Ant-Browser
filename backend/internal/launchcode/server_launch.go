@@ -9,12 +9,7 @@ import (
 )
 
 func (s *LaunchServer) launchSuccessPayload(profile *browser.Profile, launchCode string) map[string]interface{} {
-	cdpURL := s.CDPURL()
-	cdpPort := s.Port()
-	if cdpURL == "" && profile != nil && profile.DebugReady && profile.DebugPort > 0 {
-		cdpPort = profile.DebugPort
-		cdpURL = fmt.Sprintf("http://127.0.0.1:%d", profile.DebugPort)
-	}
+	cdpPort, cdpURL := s.profileCDPEndpoint(profile)
 
 	return map[string]interface{}{
 		"ok":             true,
@@ -28,6 +23,21 @@ func (s *LaunchServer) launchSuccessPayload(profile *browser.Profile, launchCode
 		"cdpPort":        cdpPort,
 		"cdpUrl":         cdpURL,
 	}
+}
+
+func (s *LaunchServer) profileCDPEndpoint(profile *browser.Profile) (int, string) {
+	if profile == nil || !profile.DebugReady || profile.DebugPort <= 0 {
+		return 0, ""
+	}
+
+	activePort, activeID, _ := s.activeTarget()
+	if activePort > 0 && strings.TrimSpace(profile.ProfileId) != "" && profile.ProfileId == activeID {
+		if cdpURL := s.CDPURL(); cdpURL != "" {
+			return s.Port(), cdpURL
+		}
+	}
+
+	return profile.DebugPort, fmt.Sprintf("http://127.0.0.1:%d", profile.DebugPort)
 }
 
 func (s *LaunchServer) launchByCode(code string, params LaunchRequestParams) (*browser.Profile, string, int, string) {
@@ -197,12 +207,7 @@ func (s *LaunchServer) launchBatchSuccessPayload(profiles []*browser.Profile) ma
 	}
 
 	activeProfile, _, _ := summarizeLaunchedProfiles(profiles)
-	cdpURL := s.CDPURL()
-	cdpPort := s.Port()
-	if cdpURL == "" && activeProfile != nil && activeProfile.DebugReady && activeProfile.DebugPort > 0 {
-		cdpPort = activeProfile.DebugPort
-		cdpURL = fmt.Sprintf("http://127.0.0.1:%d", activeProfile.DebugPort)
-	}
+	cdpPort, cdpURL := s.profileCDPEndpoint(activeProfile)
 
 	payload := map[string]interface{}{
 		"ok":        true,

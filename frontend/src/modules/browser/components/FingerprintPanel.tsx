@@ -1,6 +1,6 @@
 ﻿import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronUp, RefreshCw, ShieldCheck, Wand2 } from 'lucide-react'
-import { Button, ConfirmModal, FormItem, Input, Select, Textarea } from '../../../shared/components'
+import { Button, ConfirmModal, FormItem, Input, Select, Textarea, toast } from '../../../shared/components'
 import { generateFingerprintProfile, validateFingerprintProfile } from '../api/fingerprint'
 import type { FingerprintHealthReport } from '../types'
 import {
@@ -191,6 +191,16 @@ const COUNTRY_OPTIONS = [
   { value: 'SG', label: '新加坡' },
 ]
 
+function fingerprintHealthLabel(health: FingerprintHealthReport): string {
+  const statusLabel = health.status === 'red' ? '本地预检高风险' : health.status === 'yellow' ? '本地预检需复核' : '本地预检通过'
+  const issueCount = health.issues?.length || 0
+  return `${statusLabel} · ${issueCount > 0 ? `${issueCount} 个风险项` : '无风险项'}`
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message ? error.message : fallback
+}
+
 export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
   const [config, setConfig] = useState<FingerprintConfig>(() => deserialize(value))
   const [advancedOpen, setAdvancedOpen] = useState(false)
@@ -271,6 +281,10 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
       setHealthArgsKey(nextArgs.join('\n'))
       syncQuickControls(parsed)
       onChange(nextArgs)
+    } catch (error) {
+      setHealth(null)
+      setHealthArgsKey('')
+      toast.error(errorMessage(error, '生成指纹失败'))
     } finally {
       setGenerating(false)
     }
@@ -283,6 +297,10 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
       const args = serialize(config)
       setHealth(await validateFingerprintProfile({ args }))
       setHealthArgsKey(args.join('\n'))
+    } catch (error) {
+      setHealth(null)
+      setHealthArgsKey('')
+      toast.error(errorMessage(error, '健康检查失败'))
     } finally {
       setValidating(false)
     }
@@ -385,7 +403,7 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
                   ? 'text-amber-700 border-amber-200 bg-amber-50'
                   : 'text-green-600 border-green-200 bg-green-50'
             }`}>
-              {currentHealth.status === 'red' ? '高风险' : currentHealth.status === 'yellow' ? '需复核' : '健康'} · {currentHealth.issues?.length || 0} 项
+              {fingerprintHealthLabel(currentHealth)}
             </span>
           )}
         </div>
