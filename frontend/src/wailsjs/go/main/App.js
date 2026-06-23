@@ -190,6 +190,10 @@ export function BrowserInstanceOpenUrl(arg1, arg2) {
   return window['go']['main']['App']['BrowserInstanceOpenUrl'](arg1, arg2);
 }
 
+export function BrowserInstancePreflight(arg1, arg2) {
+  return window['go']['main']['App']['BrowserInstancePreflight'](arg1, arg2);
+}
+
 export function BrowserInstanceRestart(arg1) {
   return window['go']['main']['App']['BrowserInstanceRestart'](arg1);
 }
@@ -276,6 +280,10 @@ export function BrowserProxyBatchTestSpeed(arg1, arg2) {
 
 export function BrowserProxyCheckIPHealth(arg1) {
   return window['go']['main']['App']['BrowserProxyCheckIPHealth'](arg1);
+}
+
+export function BrowserProxySuggestFingerprint(arg1) {
+  return window['go']['main']['App']['BrowserProxySuggestFingerprint'](arg1);
 }
 
 export function BrowserProxyFetchClashByURL(arg1) {

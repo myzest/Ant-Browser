@@ -1,6 +1,6 @@
-﻿import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, RefreshCw, Wand2 } from 'lucide-react'
-import { ConfirmModal, FormItem, Input, Select, Textarea } from '../../../shared/components'
+import { useEffect, useMemo, useState } from 'react'
+import { ChevronDown, ChevronUp, RefreshCw, Sparkles, Wand2 } from 'lucide-react'
+import { Badge, ConfirmModal, FormItem, Input, Select, Textarea } from '../../../shared/components'
 import {
   type FingerprintConfig,
   FINGERPRINT_PRESETS,
@@ -10,10 +10,20 @@ import {
   randomFingerprintSeed,
   serialize,
 } from '../utils/fingerprintSerializer'
+import {
+  buildFingerprintCapabilityMatrix,
+  formatFingerprintRecommendationProxyLabel,
+  getFingerprintRecommendationSummary,
+  mergeFingerprintRecommendation,
+  summarizeFingerprintCapabilities,
+} from '../utils/fingerprintAdvisor'
+import type { BrowserProxyFingerprintRecommendation } from '../types/fingerprint'
 
 interface FingerprintPanelProps {
   value: string[]
   onChange: (args: string[]) => void
+  coreType?: string
+  recommendation?: BrowserProxyFingerprintRecommendation | null
 }
 
 const BRAND_OPTIONS = [
@@ -45,7 +55,6 @@ const LANG_OPTIONS = [
 const TIMEZONE_OPTIONS = [
   { value: '', label: '不设置' },
   { value: 'system', label: '跟随系统时区' },
-  // 亚洲
   { value: 'Asia/Shanghai', label: 'Asia/Shanghai (UTC+8)' },
   { value: 'Asia/Tokyo', label: 'Asia/Tokyo (UTC+9)' },
   { value: 'Asia/Seoul', label: 'Asia/Seoul (UTC+9)' },
@@ -53,19 +62,16 @@ const TIMEZONE_OPTIONS = [
   { value: 'Asia/Hong_Kong', label: 'Asia/Hong_Kong (UTC+8)' },
   { value: 'Asia/Dubai', label: 'Asia/Dubai (UTC+4)' },
   { value: 'Asia/Kolkata', label: 'Asia/Kolkata (UTC+5:30)' },
-  // 美洲
   { value: 'America/New_York', label: 'America/New_York (UTC-5)' },
   { value: 'America/Los_Angeles', label: 'America/Los_Angeles (UTC-8)' },
   { value: 'America/Chicago', label: 'America/Chicago (UTC-6)' },
   { value: 'America/Denver', label: 'America/Denver (UTC-7)' },
   { value: 'America/Toronto', label: 'America/Toronto (UTC-5)' },
   { value: 'America/Sao_Paulo', label: 'America/Sao_Paulo (UTC-3)' },
-  // EMEA
   { value: 'Europe/London', label: 'Europe/London (UTC+0)' },
   { value: 'Europe/Paris', label: 'Europe/Paris (UTC+1)' },
   { value: 'Europe/Berlin', label: 'Europe/Berlin (UTC+1)' },
   { value: 'Europe/Moscow', label: 'Europe/Moscow (UTC+3)' },
-  // 大洋洲
   { value: 'Australia/Sydney', label: 'Australia/Sydney (UTC+10)' },
   { value: 'Pacific/Auckland', label: 'Pacific/Auckland (UTC+12)' },
 ]
@@ -170,7 +176,7 @@ const PRESET_OPTIONS = [
   ...FINGERPRINT_PRESETS.map(p => ({ value: p.id, label: p.name })),
 ]
 
-export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
+export function FingerprintPanel({ value, onChange, coreType, recommendation }: FingerprintPanelProps) {
   const [config, setConfig] = useState<FingerprintConfig>(() => deserialize(value))
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [, setCustomRenderer] = useState('')
@@ -190,7 +196,6 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
     if (!presetId) return
     const preset = FINGERPRINT_PRESETS.find(p => p.id === presetId)
     if (!preset) return
-    // 应用预设时自动生成新种子，保留未知参数
     const next: FingerprintConfig = {
       ...preset.config,
       seed: randomFingerprintSeed(),
@@ -216,10 +221,103 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
     : false
 
   const advancedText = serialize(config).join('\n')
+  const capabilityMatrix = useMemo(
+    () => buildFingerprintCapabilityMatrix(coreType, config, recommendation),
+    [coreType, config, recommendation],
+  )
+  const capabilitySummary = useMemo(
+    () => summarizeFingerprintCapabilities(coreType),
+    [coreType],
+  )
+  const groupedCapabilities = useMemo(() => {
+    const groups = new Map<string, typeof capabilityMatrix>()
+    capabilityMatrix.forEach((item) => {
+      const items = groups.get(item.group) || []
+      items.push(item)
+      groups.set(item.group, items)
+    })
+    return Array.from(groups.entries()).map(([group, items]) => ({ group, items }))
+  }, [capabilityMatrix])
+  const recommendationSummary = getFingerprintRecommendationSummary(recommendation)
+  const recommendationLabel = formatFingerprintRecommendationProxyLabel(recommendation)
+  const recommendationApplied = recommendation
+    ? mergeFingerprintRecommendation(value, recommendation).join('\n') === advancedText
+    : false
+  const handleApplyRecommendation = () => {
+    if (!recommendation) return
+    const nextArgs = mergeFingerprintRecommendation(value, recommendation)
+    onChange(nextArgs)
+  }
 
   return (
     <div className="space-y-4">
-      {/* 指纹种子 */}
+      <div className="p-3 rounded-lg bg-[var(--color-bg-hover)] border border-[var(--color-border)] space-y-3">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">浏览器能力矩阵</span>
+              <Badge variant="success" size="sm">{capabilitySummary.supported} supported</Badge>
+              <Badge variant="warning" size="sm">{capabilitySummary.partial} partial</Badge>
+              <Badge variant="error" size="sm">{capabilitySummary.unsupported} unsupported</Badge>
+            </div>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">
+              依据当前内核类型标注字段可用性；{recommendation ? `当前推荐代理：${recommendationLabel}` : '当前未获取代理推荐'}
+            </p>
+          </div>
+          {recommendation && (
+            <button
+              type="button"
+              onClick={handleApplyRecommendation}
+              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-[var(--color-accent)] text-white hover:opacity-90 transition-opacity shrink-0"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              {recommendationApplied ? '重新应用推荐' : '应用推荐'}
+            </button>
+          )}
+        </div>
+
+        {recommendationSummary && (
+          <div className="text-xs text-[var(--color-text-muted)]">
+            {recommendationSummary}
+            {recommendation?.updatedAt ? ` · 更新时间 ${recommendation.updatedAt}` : ''}
+          </div>
+        )}
+
+        <div className="space-y-3">
+          {groupedCapabilities.map(section => (
+            <div key={section.group} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-bg-surface)] overflow-hidden">
+              <div className="px-3 py-2 text-xs font-semibold text-[var(--color-text-muted)] uppercase tracking-wide border-b border-[var(--color-border)]">
+                {section.group}
+              </div>
+              <div className="divide-y divide-[var(--color-border)]">
+                {section.items.map((item) => {
+                  const variant = item.status === 'supported' ? 'success' : item.status === 'partial' ? 'warning' : 'error'
+                  return (
+                    <div key={item.key} className="grid grid-cols-1 gap-2 px-3 py-2.5 lg:grid-cols-[180px_110px_1fr] lg:items-center">
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span className="text-sm font-medium text-[var(--color-text-primary)] truncate">{item.label}</span>
+                      </div>
+                      <div>
+                        <Badge variant={variant} size="sm" dot>{item.status}</Badge>
+                      </div>
+                      <div className="text-xs text-[var(--color-text-secondary)] space-y-1">
+                        <div className="flex flex-wrap gap-x-4 gap-y-1">
+                          <span><span className="text-[var(--color-text-muted)]">当前：</span>{item.currentValue}</span>
+                          {item.recommendedValue && (
+                            <span><span className="text-[var(--color-text-muted)]">推荐：</span>{item.recommendedValue}</span>
+                          )}
+                        </div>
+                        {item.note && <div className="text-[var(--color-text-muted)]">{item.note}</div>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="p-3 rounded-lg bg-[var(--color-bg-hover)] border border-[var(--color-border)] space-y-2">
         <div className="flex items-center justify-between">
           <span className="text-xs font-medium text-[var(--color-text-muted)] uppercase tracking-wide">指纹种子（Fingerprint Seed）</span>
@@ -260,7 +358,6 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
         danger
       />
 
-      {/* 预设选择 */}
       <div className="flex items-center gap-3 p-3 rounded-lg bg-[var(--color-bg-hover)] border border-[var(--color-border)]">
         <Wand2 className="w-4 h-4 text-[var(--color-text-muted)] shrink-0" />
         <div className="flex-1 min-w-0">
@@ -273,7 +370,6 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
         <span className="text-xs text-[var(--color-text-muted)] shrink-0">选择后覆盖当前配置</span>
       </div>
 
-      {/* 基础身份 */}
       <div>
         <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">基础身份</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -287,16 +383,19 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
             <Select value={config.lang ?? ''} onChange={e => update({ lang: e.target.value || undefined })} options={LANG_OPTIONS} />
           </FormItem>
           <FormItem label="时区">
-            <Select value={config.timezone ?? ''} onChange={e => update({ timezone: e.target.value || undefined })} options={TIMEZONE_OPTIONS.map(opt =>
-              opt.value === 'system'
-                ? { ...opt, label: `跟随系统时区 (当前: ${getSystemTimezone()})` }
-                : opt
-            )} />
+            <Select
+              value={config.timezone ?? ''}
+              onChange={e => update({ timezone: e.target.value || undefined })}
+              options={TIMEZONE_OPTIONS.map(opt => (
+                opt.value === 'system'
+                  ? { ...opt, label: `跟随系统时区 (当前: ${getSystemTimezone()})` }
+                  : opt
+              ))}
+            />
           </FormItem>
         </div>
       </div>
 
-      {/* 屏幕与硬件 */}
       <div>
         <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">屏幕与硬件</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -327,7 +426,6 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
         </div>
       </div>
 
-      {/* 渲染指纹 */}
       <div>
         <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">渲染指纹</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -364,21 +462,26 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
           <FormItem label="Canvas 噪声">
             <Select
               value={config.canvasNoise === undefined ? '' : String(config.canvasNoise)}
-              onChange={e => { const v = e.target.value; update({ canvasNoise: v === '' ? undefined : v === 'true' }) }}
+              onChange={e => {
+                const v = e.target.value
+                update({ canvasNoise: v === '' ? undefined : v === 'true' })
+              }}
               options={BOOL_OPTIONS}
             />
           </FormItem>
           <FormItem label="Audio 噪声">
             <Select
               value={config.audioNoise === undefined ? '' : String(config.audioNoise)}
-              onChange={e => { const v = e.target.value; update({ audioNoise: v === '' ? undefined : v === 'true' }) }}
+              onChange={e => {
+                const v = e.target.value
+                update({ audioNoise: v === '' ? undefined : v === 'true' })
+              }}
               options={BOOL_OPTIONS}
             />
           </FormItem>
         </div>
       </div>
 
-      {/* 网络与隐私 */}
       <div>
         <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">网络与隐私</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -388,7 +491,10 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
           <FormItem label="Do Not Track">
             <Select
               value={config.doNotTrack === undefined ? '' : String(config.doNotTrack)}
-              onChange={e => { const v = e.target.value; update({ doNotTrack: v === '' ? undefined : v === 'true' }) }}
+              onChange={e => {
+                const v = e.target.value
+                update({ doNotTrack: v === '' ? undefined : v === 'true' })
+              }}
               options={BOOL_OPTIONS}
             />
           </FormItem>
@@ -402,7 +508,6 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
         </div>
       </div>
 
-      {/* 字体 */}
       <div>
         <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">字体</p>
         <FormItem label="字体列表">
@@ -414,7 +519,6 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
         </FormItem>
       </div>
 
-      {/* 高级模式 */}
       <div className="border border-[var(--color-border)] rounded-lg overflow-hidden">
         <button
           type="button"

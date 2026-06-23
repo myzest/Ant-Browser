@@ -1,13 +1,15 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { FolderOpen, Layers } from 'lucide-react'
+import { FolderOpen, Layers, Sparkles } from 'lucide-react'
 import { Button, Card, ConfirmModal, FormItem, Input, Modal, Select, Textarea, toast } from '../../../shared/components'
 import type { BrowserCore, BrowserProfileInput, BrowserProxy, BrowserGroup } from '../types'
-import { createBrowserProfile, fetchAllTags, fetchBrowserCores, fetchBrowserProfiles, fetchBrowserProxies, fetchBrowserSettings, fetchGroups, openUserDataDir, updateBrowserProfile } from '../api'
+import { createBrowserProfile, fetchAllTags, fetchBrowserCores, fetchBrowserProfiles, fetchBrowserProxies, fetchBrowserSettings, fetchGroups, openUserDataDir, recommendFingerprintByProxy, updateBrowserProfile } from '../api'
 import { FingerprintPanel } from '../components/FingerprintPanel'
 import { TagInput } from '../components/TagInput'
 import { GroupSelector } from '../components/GroupSelector'
 import { ProxyPickerModal } from '../components/ProxyPickerModal'
+import type { BrowserProxyFingerprintRecommendation } from '../types/fingerprint'
+import { mergeFingerprintRecommendation } from '../utils/fingerprintAdvisor'
 
 const fallbackLowLaunchArgs = ['--disable-sync', '--no-first-run']
 const directProxyID = '__direct__'
@@ -48,6 +50,10 @@ function resolvePoolProxySelection(
   return { proxyId: directProxy?.proxyId || '', proxyConfig: '' }
 }
 
+function getProxySelectionKey(proxyId: string, proxyConfig: string): string {
+  return `${proxyId.trim()}|||${proxyConfig.trim().toLowerCase()}`
+}
+
 export function BrowserEditPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -71,6 +77,9 @@ export function BrowserEditPage() {
   const [allTags, setAllTags] = useState<string[]>([])
   const [saving, setSaving] = useState(false)
   const [proxyPickerOpen, setProxyPickerOpen] = useState(false)
+  const [fingerprintRecommendation, setFingerprintRecommendation] = useState<BrowserProxyFingerprintRecommendation | null>(null)
+  const [fingerprintRecommendationKey, setFingerprintRecommendationKey] = useState('')
+  const [recommendingFingerprint, setRecommendingFingerprint] = useState(false)
   const [isDirty, setIsDirty] = useState(false)
   const [leaveConfirm, setLeaveConfirm] = useState(false)
   const [saveError, setSaveError] = useState('')
@@ -170,6 +179,27 @@ export function BrowserEditPage() {
   }
 
   const defaultCore = cores.find(c => c.isDefault)
+  const selectedCore = useMemo(() => {
+    if (formData.coreId) {
+      return cores.find(core => core.coreId === formData.coreId) || null
+    }
+    return defaultCore || null
+  }, [cores, defaultCore, formData.coreId])
+  const selectedProxy = useMemo(
+    () => proxies.find(proxy => proxy.proxyId === formData.proxyId) || null,
+    [formData.proxyId, proxies],
+  )
+  const currentRecommendationKey = useMemo(
+    () => `${getProxySelectionKey(formData.proxyId || '', formData.proxyConfig || '')}|||${selectedCore?.coreType || ''}`,
+    [formData.proxyConfig, formData.proxyId, selectedCore?.coreType],
+  )
+
+  useEffect(() => {
+    if (fingerprintRecommendationKey && fingerprintRecommendationKey !== currentRecommendationKey) {
+      setFingerprintRecommendation(null)
+      setFingerprintRecommendationKey('')
+    }
+  }, [currentRecommendationKey, fingerprintRecommendationKey])
 
   const handleOpenUserDataDir = async () => {
     if (!formData.userDataDir.trim()) {
@@ -200,6 +230,35 @@ export function BrowserEditPage() {
     }
 
     handleChange('proxyId', '')
+  }
+
+  const handleRecommendFingerprint = async () => {
+    const proxyId = (formData.proxyId || '').trim()
+    const proxyConfig = (formData.proxyConfig || '').trim()
+    if (!proxyId && !proxyConfig) {
+      toast.error('请先选择代理节点')
+      return
+    }
+
+    setRecommendingFingerprint(true)
+    try {
+      const recommendation = await recommendFingerprintByProxy({
+        proxyId,
+        proxyConfig,
+        proxyName: selectedProxy?.proxyName || '',
+        coreType: selectedCore?.coreType || '',
+        proxy: selectedProxy,
+      })
+      const nextArgs = mergeFingerprintRecommendation(formData.fingerprintArgs, recommendation)
+      setFingerprintRecommendation(recommendation)
+      setFingerprintRecommendationKey(currentRecommendationKey)
+      handleChange('fingerprintArgs', nextArgs)
+      toast.success('已根据代理推荐并应用指纹')
+    } catch (error: unknown) {
+      toast.error((error as Error)?.message || '获取指纹推荐失败')
+    } finally {
+      setRecommendingFingerprint(false)
+    }
   }
 
   return (
@@ -306,9 +365,26 @@ export function BrowserEditPage() {
       />
 
       <Card title="指纹配置" subtitle="配置浏览器指纹参数">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between mb-4">
+          <div className="text-xs text-[var(--color-text-muted)]">
+            当前内核：{selectedCore?.coreName || '默认内核'}；当前代理：{selectedProxy?.proxyName || formData.proxyId || '未选择'}
+          </div>
+          <Button
+            variant="secondary"
+            size="sm"
+            onClick={handleRecommendFingerprint}
+            loading={recommendingFingerprint}
+            disabled={recommendingFingerprint || (!formData.proxyId && !formData.proxyConfig)}
+          >
+            <Sparkles className="w-4 h-4" />
+            根据代理推荐指纹
+          </Button>
+        </div>
         <FingerprintPanel
           value={formData.fingerprintArgs}
           onChange={args => handleChange('fingerprintArgs', args)}
+          coreType={selectedCore?.coreType}
+          recommendation={fingerprintRecommendation}
         />
       </Card>
 

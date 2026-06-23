@@ -1,8 +1,9 @@
 import { Link } from 'react-router-dom'
-import { ExternalLink, XCircle } from 'lucide-react'
-import { Button, FormItem, Input, Modal } from '../../../../shared/components'
+import { AlertCircle, ExternalLink, ShieldAlert, ShieldCheck, AlertTriangle, XCircle } from 'lucide-react'
+import { Alert, Badge, Button, FormItem, Input, Modal } from '../../../../shared/components'
 import { KeywordsModal } from '../../components/KeywordsModal'
 import type { BrowserProfile } from '../../types'
+import type { BrowserStartPreflightResult, BrowserStartWarningSeverity } from '../../utils/startPreflight'
 
 interface BrowserListDialogsProps {
   proxyErrorModal: boolean
@@ -31,6 +32,23 @@ interface BrowserListDialogsProps {
   copying: boolean
   opError: string
   onCloseOpError: () => void
+  startPreflightModal: {
+    open: boolean
+    profile: BrowserProfile | null
+    mode: 'normal' | 'direct'
+    loading: boolean
+    result: BrowserStartPreflightResult | null
+    acknowledged: boolean
+  }
+  onCloseStartPreflight: () => void
+  onAcknowledgeStartPreflight: (value: boolean) => void
+  onConfirmStartPreflight: () => void | Promise<void>
+}
+
+const SEVERITY_STYLES: Record<BrowserStartWarningSeverity, { icon: typeof AlertCircle; badge: 'default' | 'info' | 'warning' | 'error'; label: string }> = {
+  info: { icon: AlertCircle, badge: 'info', label: '提示' },
+  warning: { icon: AlertTriangle, badge: 'warning', label: '警告' },
+  error: { icon: ShieldAlert, badge: 'error', label: '严重' },
 }
 
 export function BrowserListDialogs({
@@ -60,7 +78,41 @@ export function BrowserListDialogs({
   copying,
   opError,
   onCloseOpError,
+  startPreflightModal,
+  onCloseStartPreflight,
+  onAcknowledgeStartPreflight,
+  onConfirmStartPreflight,
 }: BrowserListDialogsProps) {
+  const preflight = startPreflightModal.result
+  const requireConfirm = Boolean(preflight?.requireConfirm)
+  const canConfirm = !startPreflightModal.loading && !!preflight && (!requireConfirm || startPreflightModal.acknowledged)
+  const resultRisk = preflight?.riskLevel || 'unknown'
+  const resultRiskBadge = (() => {
+    if (resultRisk === 'low') return 'success'
+    if (resultRisk === 'medium') return 'warning'
+    if (resultRisk === 'high' || resultRisk === 'critical') return 'error'
+    return 'info'
+  })() as 'success' | 'warning' | 'error' | 'info'
+
+  const renderEntry = (item: BrowserStartPreflightResult['warnings'][number], index: number) => {
+    const config = SEVERITY_STYLES[item.severity]
+    const Icon = config.icon
+    return (
+      <div key={item.id || `${item.severity}-${index}`} className="rounded-lg border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-3">
+        <div className="flex items-start gap-3">
+          <Icon className={`mt-0.5 h-5 w-5 shrink-0 ${item.severity === 'error' ? 'text-[var(--color-error)]' : item.severity === 'warning' ? 'text-[var(--color-warning)]' : 'text-[var(--color-accent)]'}`} />
+          <div className="min-w-0 flex-1 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant={config.badge}>{config.label}</Badge>
+              <span className="text-sm text-[var(--color-text-primary)]">{item.message}</span>
+            </div>
+            {item.detail && <p className="text-xs text-[var(--color-text-muted)] whitespace-pre-line">{item.detail}</p>}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <>
       <Modal
@@ -194,6 +246,106 @@ export function BrowserListDialogs({
         footer={<Button onClick={onCloseOpError}>知道了</Button>}
       >
         <div className="text-[var(--color-text-secondary)] whitespace-pre-line">{opError}</div>
+      </Modal>
+
+      <Modal
+        open={startPreflightModal.open}
+        onClose={onCloseStartPreflight}
+        title="启动前 preflight 确认"
+        width="640px"
+        footer={
+          <>
+            <Button variant="secondary" onClick={onCloseStartPreflight} disabled={startPreflightModal.loading}>取消</Button>
+            <Button onClick={onConfirmStartPreflight} loading={startPreflightModal.loading} disabled={!canConfirm}>继续启动</Button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h4 className="text-base font-semibold text-[var(--color-text-primary)]">
+                    {preflight?.profileName || startPreflightModal.profile?.profileName || '实例'}
+                  </h4>
+                  <Badge variant={resultRiskBadge}>风险等级：{resultRisk}</Badge>
+                  <Badge variant={startPreflightModal.mode === 'direct' ? 'warning' : 'info'}>
+                    {startPreflightModal.mode === 'direct' ? '直连启动' : '标准启动'}
+                  </Badge>
+                </div>
+                <p className="mt-2 text-sm text-[var(--color-text-secondary)] whitespace-pre-line">
+                  {startPreflightModal.loading ? '正在获取启动前检查结果...' : (preflight?.summary || '暂无 preflight 说明')}
+                </p>
+              </div>
+              <div className="rounded-full bg-[var(--color-bg-surface)] p-2 text-[var(--color-accent)] shadow-sm">
+                {resultRisk === 'low' ? <ShieldCheck className="h-5 w-5" /> : <ShieldAlert className="h-5 w-5" />}
+              </div>
+            </div>
+          </div>
+
+          {!startPreflightModal.loading && preflight && (
+            <>
+              <Alert
+                type={preflight.requireConfirm ? 'warning' : 'info'}
+                title={preflight.requireConfirm ? '需要显式确认' : '可直接继续'}
+                message={(
+                  <div className="space-y-2">
+                    <p className="whitespace-pre-line">{preflight.summary}</p>
+                    <p className="text-xs text-[var(--color-text-muted)]">
+                      来源：{preflight.source} · 结果会在启动前用于风险提示，不会修改后端 preflight 或代理推荐逻辑。
+                    </p>
+                  </div>
+                )}
+              />
+
+              {preflight.warnings.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <AlertTriangle className="h-4 w-4 text-[var(--color-warning)]" />
+                    <h5 className="text-sm font-medium text-[var(--color-text-primary)]">风险提示</h5>
+                  </div>
+                  <div className="space-y-2">
+                    {preflight.warnings.map(renderEntry)}
+                  </div>
+                </div>
+              )}
+
+              {preflight.explicitAlerts.length > 0 && (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="h-4 w-4 text-[var(--color-error)]" />
+                    <h5 className="text-sm font-medium text-[var(--color-text-primary)]">明确告警</h5>
+                  </div>
+                  <div className="space-y-2">
+                    {preflight.explicitAlerts.map(renderEntry)}
+                  </div>
+                </div>
+              )}
+
+              {requireConfirm && (
+                <div className="rounded-xl border border-[var(--color-error)]/25 bg-[var(--color-error)]/10 p-4">
+                  <label className="flex cursor-pointer items-start gap-3">
+                    <input
+                      type="checkbox"
+                      className="mt-1 h-4 w-4 rounded border-[var(--color-border-default)] accent-[var(--color-error)]"
+                      checked={startPreflightModal.acknowledged}
+                      onChange={(e) => onAcknowledgeStartPreflight(e.target.checked)}
+                    />
+                    <span className="text-sm text-[var(--color-text-secondary)]">
+                      我已阅读上述风险提示，理解在高风险情况下继续启动的后果，并确认要继续。
+                    </span>
+                  </label>
+                </div>
+              )}
+            </>
+          )}
+
+          {startPreflightModal.loading && (
+            <div className="rounded-xl border border-[var(--color-border-default)] bg-[var(--color-bg-secondary)] p-4 text-sm text-[var(--color-text-muted)]">
+              后端正在生成 preflight 结构化结果，请稍候。
+            </div>
+          )}
+        </div>
       </Modal>
     </>
   )

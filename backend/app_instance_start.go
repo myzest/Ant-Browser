@@ -1,5 +1,7 @@
 package backend
 
+import "ant-chrome/backend/internal/logger"
+
 func (a *App) BrowserInstanceStart(profileId string) (*BrowserProfile, error) {
 	return a.browserInstanceStartInternal(profileId, nil, nil, false, false, false, "", "")
 }
@@ -34,6 +36,15 @@ func (a *App) browserInstanceStartInternal(profileId string, extraLaunchArgs []s
 		return profile, err
 	}
 	defer plan.releaseBridgeIfNeeded(a)
+	if plan != nil && plan.preflight != nil {
+		logger.New("Browser").Info("启动前预检结果已生成",
+			logger.F("profile_id", input.ProfileID),
+			logger.F("risk_level", plan.preflight.RiskLevel),
+			logger.F("format_errors", len(plan.preflight.FormatErrors)),
+			logger.F("managed_arg_warnings", len(plan.preflight.ManagedArgWarnings)),
+			logger.F("fingerprint_warnings", len(plan.preflight.FingerprintWarnings)),
+		)
+	}
 
 	return a.startBrowserProfileWithPlan(input, plan)
 }

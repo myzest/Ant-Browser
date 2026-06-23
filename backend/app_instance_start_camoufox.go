@@ -49,7 +49,7 @@ type camoufoxStartPayload struct {
 //  4. 从内嵌指纹池按 OS+seed 取一条指纹
 //  5. 应用 profile.FingerprintArgs 覆盖
 //  6. 编码 CAMOU_CONFIG_* 并写 launcher payload 临时文件
-func (a *App) prepareCamoufoxStartPlan(input browserStartInput, profile *BrowserProfile, coreType string, camoufoxBinaryPath string, userDataDir string, sanitizedProfileLaunchArgs []string, sanitizedExtraLaunchArgs []string) (*browserStartPlan, error) {
+func (a *App) prepareCamoufoxStartPlan(input browserStartInput, profile *BrowserProfile, preflight *browserStartPreflightResult, coreType string, camoufoxBinaryPath string, userDataDir string, sanitizedProfileLaunchArgs []string, sanitizedExtraLaunchArgs []string) (*browserStartPlan, error) {
 	log := logger.New("Camoufox")
 
 	ctx := context.Background()
@@ -163,6 +163,7 @@ func (a *App) prepareCamoufoxStartPlan(input browserStartInput, profile *Browser
 
 	return &browserStartPlan{
 		profile:               profile,
+		preflight:             preflight,
 		chromeBinaryPath:      camoufoxBinaryPath,
 		coreType:              coreType,
 		runtimeProtocol:       browser.RuntimeProtocolPlaywright,

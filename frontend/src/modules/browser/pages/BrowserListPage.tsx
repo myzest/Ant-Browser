@@ -12,6 +12,12 @@ import { PROJECT_GITHUB_URL } from '../../../config/links'
 import { resolveActionErrorMessage, resolveActionFeedback } from '../utils/actionErrors'
 import { BrowserListDialogs } from './browserList/BrowserListDialogs'
 import {
+  browserStartRequireExplicitConfirm,
+  fetchBrowserStartPreflight,
+  type BrowserStartMode,
+  type BrowserStartPreflightResult,
+} from '../utils/startPreflight'
+import {
   copyBrowserProfile,
   deleteBrowserCore,
   deleteBrowserProfile,
@@ -96,6 +102,21 @@ export function BrowserListPage() {
   const [proxyErrorMsg, setProxyErrorMsg] = useState('')
   const [opError, setOpError] = useState('')
   const [pendingStartId, setPendingStartId] = useState<string | null>(null)
+  const [startPreflightModal, setStartPreflightModal] = useState<{
+    open: boolean
+    profile: BrowserProfile | null
+    mode: BrowserStartMode
+    loading: boolean
+    result: BrowserStartPreflightResult | null
+    acknowledged: boolean
+  }>({
+    open: false,
+    profile: null,
+    mode: 'normal',
+    loading: false,
+    result: null,
+    acknowledged: false,
+  })
   const [startingIds, setStartingIds] = useState<Set<string>>(new Set())
   const [stoppingIds, setStoppingIds] = useState<Set<string>>(new Set())
   const profilesRef = useRef<BrowserProfile[]>([])
@@ -119,6 +140,67 @@ export function BrowserListPage() {
   const closeCopyModal = () => {
     setCopyModal({ open: false, profile: null })
     setCopyName('')
+  }
+
+  const resetStartPreflightModal = () => {
+    setStartPreflightModal({
+      open: false,
+      profile: null,
+      mode: 'normal',
+      loading: false,
+      result: null,
+      acknowledged: false,
+    })
+  }
+
+  const openStartPreflightModal = (profile: BrowserProfile, mode: BrowserStartMode) => {
+    setStartPreflightModal({
+      open: true,
+      profile,
+      mode,
+      loading: true,
+      result: null,
+      acknowledged: false,
+    })
+  }
+
+  const loadStartPreflight = async (profile: BrowserProfile, mode: BrowserStartMode) => {
+    openStartPreflightModal(profile, mode)
+    try {
+      const result = await fetchBrowserStartPreflight(profile, mode)
+      setStartPreflightModal({
+        open: true,
+        profile,
+        mode,
+        loading: false,
+        result,
+        acknowledged: false,
+      })
+    } catch (error: any) {
+      setStartPreflightModal({
+        open: true,
+        profile,
+        mode,
+        loading: false,
+        result: {
+          profileId: profile.profileId,
+          profileName: profile.profileName,
+          mode,
+          source: 'frontend-fallback',
+          riskLevel: 'unknown',
+          summary: error?.message || 'preflight 检查失败，建议先阅读后再继续。',
+          warnings: [],
+          explicitAlerts: [{
+            id: 'preflight-fetch-failed',
+            message: error?.message || '无法读取 preflight 结果，请确认后再继续。',
+            severity: 'warning',
+            explicit: true,
+          }],
+          requireConfirm: true,
+        },
+        acknowledged: false,
+      })
+    }
   }
 
   // 基础配置弹窗
@@ -340,6 +422,34 @@ export function BrowserListPage() {
     resolveProfileStatus(profile.running, profile.debugReady, isProfileStarting(profile.profileId), isProfileStopping(profile.profileId))
   )
 
+  const executeStart = async (profileId: string, mode: BrowserStartMode) => {
+    updatePendingIds(setStartingIds, profileId, true)
+    try {
+      const startedProfile = mode === 'direct'
+        ? await startBrowserInstanceDirect(profileId)
+        : await startBrowserInstance(profileId)
+      mergeProfileState(startedProfile)
+      resetStartPreflightModal()
+      if (startedProfile?.running && !startedProfile.debugReady && startedProfile.runtimeWarning) {
+        toast.warning(startedProfile.runtimeWarning)
+      } else {
+        toast.success(`实例已${mode === 'direct' ? '直连' : ''}启动${startedProfile?.profileName ? `：${startedProfile.profileName}` : ''}`)
+      }
+      await loadProfiles({ silent: true, syncRuntimeState: true })
+    } catch (error: any) {
+      resetStartPreflightModal()
+      const feedback = resolveActionFeedback(error, mode === 'direct' ? '实例直连启动失败' : '实例启动失败')
+      if (feedback.tone === 'warning') {
+        toast.warning(feedback.message)
+      } else {
+        toast.error(feedback.message)
+      }
+      await loadProfiles({ silent: true, syncRuntimeState: true })
+    } finally {
+      updatePendingIds(setStartingIds, profileId, false)
+    }
+  }
+
   const filteredProfiles = useMemo(() => {
     const naturalCompare = (a: string, b: string): number => {
       const re = /(\d+)|(\D+)/g
@@ -385,64 +495,49 @@ export function BrowserListPage() {
 
   const handleStart = async (profileId: string) => {
     const profile = profiles.find(p => p.profileId === profileId)
+    if (!profile) return
     updatePendingIds(setStartingIds, profileId, true)
     try {
-      if (profile) {
-        const result = await validateProxyConfig(profile.proxyConfig || '', profile.proxyId || '')
-        if (!result.supported) {
-          setProxyErrorMsg(result.errorMsg)
-          setPendingStartId(profileId)
-          setProxyErrorModal(true)
-          return
-        }
+      const result = await validateProxyConfig(profile.proxyConfig || '', profile.proxyId || '')
+      if (!result.supported) {
+        updatePendingIds(setStartingIds, profileId, false)
+        setProxyErrorMsg(result.errorMsg)
+        setPendingStartId(profileId)
+        setProxyErrorModal(true)
+        return
       }
 
-      const startedProfile = await startBrowserInstance(profileId)
-      mergeProfileState(startedProfile)
-      if (startedProfile?.running && !startedProfile.debugReady && startedProfile.runtimeWarning) {
-        toast.warning(startedProfile.runtimeWarning)
-      } else {
-        toast.success(`实例已启动${startedProfile?.profileName ? `：${startedProfile.profileName}` : ''}`)
-      }
-      await loadProfiles({ silent: true, syncRuntimeState: true })
+      await loadStartPreflight(profile, 'normal')
+      updatePendingIds(setStartingIds, profileId, false)
     } catch (error: any) {
-      const feedback = resolveActionFeedback(error, '实例启动失败')
+      updatePendingIds(setStartingIds, profileId, false)
+      const feedback = resolveActionFeedback(error, '实例启动前校验失败')
       if (feedback.tone === 'warning') {
         toast.warning(feedback.message)
       } else {
         toast.error(feedback.message)
       }
       await loadProfiles({ silent: true, syncRuntimeState: true })
-    } finally {
-      updatePendingIds(setStartingIds, profileId, false)
     }
   }
 
   const handleStartDirect = async (profileId: string) => {
+    const profile = profiles.find(p => p.profileId === profileId)
+    setProxyErrorModal(false)
+    setPendingStartId(null)
+    if (!profile) return
     updatePendingIds(setStartingIds, profileId, true)
     try {
-      const startedProfile = await startBrowserInstanceDirect(profileId)
-      mergeProfileState(startedProfile)
-      setProxyErrorModal(false)
-      setPendingStartId(null)
-      if (startedProfile?.running && !startedProfile.debugReady && startedProfile.runtimeWarning) {
-        toast.warning(startedProfile.runtimeWarning)
-      } else {
-        toast.success(`实例已直连启动${startedProfile?.profileName ? `：${startedProfile.profileName}` : ''}`)
-      }
-      await loadProfiles({ silent: true, syncRuntimeState: true })
+      await loadStartPreflight(profile, 'direct')
+      updatePendingIds(setStartingIds, profileId, false)
     } catch (error: any) {
-      setProxyErrorModal(false)
-      setPendingStartId(null)
-      const feedback = resolveActionFeedback(error, '实例直连启动失败')
+      updatePendingIds(setStartingIds, profileId, false)
+      const feedback = resolveActionFeedback(error, '实例直连启动前校验失败')
       if (feedback.tone === 'warning') {
         toast.warning(feedback.message)
       } else {
         toast.error(feedback.message)
       }
-      await loadProfiles({ silent: true, syncRuntimeState: true })
-    } finally {
-      updatePendingIds(setStartingIds, profileId, false)
     }
   }
 
@@ -827,6 +922,23 @@ export function BrowserListPage() {
           }
         }}
         startingDirect={pendingStartId ? startingIds.has(pendingStartId) : false}
+        startPreflightModal={startPreflightModal}
+        onCloseStartPreflight={() => {
+          if (startPreflightModal.profile?.profileId) {
+            updatePendingIds(setStartingIds, startPreflightModal.profile.profileId, false)
+          }
+          resetStartPreflightModal()
+        }}
+        onAcknowledgeStartPreflight={(value) => setStartPreflightModal(prev => ({ ...prev, acknowledged: value }))}
+        onConfirmStartPreflight={async () => {
+          const profile = startPreflightModal.profile
+          const result = startPreflightModal.result
+          if (!profile || !result || startPreflightModal.loading) return
+          if (browserStartRequireExplicitConfirm(result) && !startPreflightModal.acknowledged) return
+          setProxyErrorModal(false)
+          setPendingStartId(null)
+          await executeStart(profile.profileId, startPreflightModal.mode)
+        }}
         kwModal={kwModal}
         onCloseKeywords={closeKwModal}
         onKeywordsSaved={(keywords) => {

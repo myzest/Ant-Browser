@@ -103,6 +103,8 @@ export function BrowserInstanceGetTabs(arg1:string):Promise<Array<browser.Tab>>;
 
 export function BrowserInstanceOpenUrl(arg1:string,arg2:string):Promise<boolean>;
 
+export function BrowserInstancePreflight(arg1:string,arg2:string):Promise<Record<string, any>>;
+
 export function BrowserInstanceRestart(arg1:string):Promise<browser.Profile>;
 
 export function BrowserInstanceStart(arg1:string):Promise<browser.Profile>;
@@ -146,6 +148,8 @@ export function BrowserProxyBatchCheckIPHealth(arg1:Array<string>,arg2:number):P
 export function BrowserProxyBatchTestSpeed(arg1:Array<string>,arg2:number):Promise<Array<backend.ProxyTestResult>>;
 
 export function BrowserProxyCheckIPHealth(arg1:string):Promise<backend.ProxyIPHealthResult>;
+
+export function BrowserProxySuggestFingerprint(arg1:string):Promise<Record<string, any>>;
 
 export function BrowserProxyFetchClashByURL(arg1:string):Promise<Record<string, any>>;
 

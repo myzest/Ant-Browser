@@ -23,6 +23,7 @@ type browserStartInput struct {
 
 type browserStartPlan struct {
 	profile               *BrowserProfile
+	preflight             *browserStartPreflightResult
 	chromeBinaryPath      string
 	coreType              string
 	runtimeProtocol       string
@@ -119,13 +120,22 @@ func (a *App) resolveBrowserStartProfile(input browserStartInput) (*BrowserProfi
 }
 
 func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserProfile) (*browserStartPlan, error) {
+	preflight := buildBrowserStartPreflightResult(input, profile)
+	preflight.emit(input.ProfileID)
+	if err := preflight.blockingError(input.ProfileID); err != nil {
+		if profile != nil {
+			profile.LastError = err.Error()
+		}
+		return nil, err
+	}
+
 	sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, chromeBinaryPath, coreType, runtimeProtocol, userDataDir, err := a.prepareBrowserLaunchContext(input, profile)
 	if err != nil {
 		return nil, err
 	}
 
 	if runtimeProtocol == browser.RuntimeProtocolPlaywright {
-		return a.prepareCamoufoxStartPlan(input, profile, coreType, chromeBinaryPath, userDataDir, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs)
+		return a.prepareCamoufoxStartPlan(input, profile, preflight, coreType, chromeBinaryPath, userDataDir, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs)
 	}
 
 	effectiveProxy, acquiredXrayBridgeKey, releaseXrayBridge, err := a.resolveBrowserStartProxy(input, profile)
@@ -151,6 +161,7 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 
 	return &browserStartPlan{
 		profile:               profile,
+		preflight:             preflight,
 		chromeBinaryPath:      chromeBinaryPath,
 		coreType:              coreType,
 		runtimeProtocol:       runtimeProtocol,
@@ -170,10 +181,8 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *BrowserProfile) ([]string, []string, string, string, string, string, error) {
 	log := logger.New("Browser")
 
-	sanitizedProfileLaunchArgs, managedProfileArgs := sanitizeManagedLaunchArgs(profile.LaunchArgs)
-	sanitizedExtraLaunchArgs, managedExtraArgs := sanitizeManagedLaunchArgs(input.ExtraLaunchArgs)
-	logManagedLaunchArgOverrides(log, input.ProfileID, "profile.launchArgs", managedProfileArgs)
-	logManagedLaunchArgOverrides(log, input.ProfileID, "start.extraLaunchArgs", managedExtraArgs)
+	sanitizedProfileLaunchArgs, _ := sanitizeManagedLaunchArgs(profile.LaunchArgs)
+	sanitizedExtraLaunchArgs, _ := sanitizeManagedLaunchArgs(input.ExtraLaunchArgs)
 
 	proxyChanged := a.browserMgr.ApplyDefaults(profile)
 	if proxyChanged {
