@@ -8,11 +8,17 @@ export async function generateFingerprintProfile(request: FingerprintGenerateReq
     return await goApp.GenerateFingerprintProfile(request)
   }
   const bindings: any = await getBindings()
-  if (bindings?.GenerateFingerprintProfile && getGoApp()) {
+  if (bindings?.GenerateFingerprintProfile) {
     return await bindings.GenerateFingerprintProfile(request)
   }
   const platform = request.platform || 'windows'
-  const fixture = localFixture(platform, request.country, request.locale, request.timezone, request.deviceClass)
+  const fixture = localFixture(
+    platform,
+    request.regionMode === 'manual' ? request.country : undefined,
+    request.regionMode === 'manual' ? request.locale : undefined,
+    request.regionMode === 'manual' ? request.timezone : undefined,
+    request.deviceClass,
+  )
   const args = serialize({
     ...deserialize(request.currentArgs || []),
     ...fixture,
@@ -44,7 +50,7 @@ export async function validateFingerprintProfile(request: FingerprintValidateReq
     return await goApp.ValidateFingerprintProfile(request)
   }
   const bindings: any = await getBindings()
-  if (bindings?.ValidateFingerprintProfile && getGoApp()) {
+  if (bindings?.ValidateFingerprintProfile) {
     return await bindings.ValidateFingerprintProfile(request)
   }
   return validateArgsLocally(request.args || [])
@@ -149,6 +155,8 @@ function localFixture(platform: string, country?: string, locale?: string, timez
       lang: region.locale,
       timezone: region.timezone,
       resolution: deviceClass === 'workstation' ? '2560,1440' : '1440,900',
+      screenAvail: deviceClass === 'workstation' ? '2560,1366' : '1440,826',
+      devicePixelRatio: '2',
       colorDepth: '24',
       hardwareConcurrency: deviceClass === 'workstation' ? '10' : '8',
       deviceMemory: deviceClass === 'workstation' ? '16' : '8',
@@ -171,6 +179,8 @@ function localFixture(platform: string, country?: string, locale?: string, timez
       lang: region.locale,
       timezone: region.timezone,
       resolution: deviceClass === 'light_linux' ? '1366,768' : '1920,1080',
+      screenAvail: deviceClass === 'light_linux' ? '1366,688' : '1920,1000',
+      devicePixelRatio: '1',
       colorDepth: '24',
       hardwareConcurrency: deviceClass === 'light_linux' ? '4' : '8',
       deviceMemory: deviceClass === 'light_linux' ? '4' : '8',
@@ -192,6 +202,8 @@ function localFixture(platform: string, country?: string, locale?: string, timez
     lang: region.locale,
     timezone: region.timezone,
     resolution: deviceClass === 'gaming' ? '2560,1440' : deviceClass === 'laptop' ? '1366,768' : '1920,1080',
+    screenAvail: deviceClass === 'gaming' ? '2560,1400' : deviceClass === 'laptop' ? '1366,728' : '1920,1040',
+    devicePixelRatio: '1',
     colorDepth: '24',
     hardwareConcurrency: deviceClass === 'gaming' ? '16' : deviceClass === 'laptop' ? '4' : '8',
     deviceMemory: deviceClass === 'gaming' ? '16' : deviceClass === 'laptop' ? '4' : '8',
@@ -225,6 +237,10 @@ function localRegion(country?: string, locale?: string, timezone?: string) {
       return { locale: locale || 'ko-KR', timezone: timezone || 'Asia/Seoul' }
     case 'SG':
       return { locale: locale || 'en-SG', timezone: timezone || 'Asia/Singapore' }
+    case 'BR':
+      return { locale: locale || 'pt-BR', timezone: timezone || 'America/Sao_Paulo' }
+    case 'IN':
+      return { locale: locale || 'en-IN', timezone: timezone || 'Asia/Kolkata' }
     default:
       return { locale: locale || 'zh-CN', timezone: timezone || 'Asia/Shanghai' }
   }

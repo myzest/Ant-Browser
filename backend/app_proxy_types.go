@@ -27,7 +27,12 @@ type ProxyIPHealthResult struct {
 	Country        string                 `json:"country"`
 	Region         string                 `json:"region"`
 	City           string                 `json:"city"`
+	Timezone       string                 `json:"timezone"`
+	Locale         string                 `json:"locale"`
 	AsOrganization string                 `json:"asOrganization"`
 	RawData        map[string]interface{} `json:"rawData"`
 	UpdatedAt      string                 `json:"updatedAt"`
+
+	localeFromRegionDefault   bool
+	timezoneFromRegionDefault bool
 }

@@ -309,6 +309,9 @@ export function BrowserEditPage() {
         <FingerprintPanel
           value={formData.fingerprintArgs}
           onChange={args => handleChange('fingerprintArgs', args)}
+          profileId={isCreate ? undefined : id}
+          proxyId={formData.proxyId}
+          proxyConfig={formData.proxyConfig}
         />
       </Card>
 

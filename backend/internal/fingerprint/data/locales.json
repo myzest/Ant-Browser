@@ -1,0 +1,62 @@
+[
+  {
+    "country": "CN",
+    "name": "China",
+    "locales": ["zh-CN"],
+    "timezones": ["Asia/Shanghai"]
+  },
+  {
+    "country": "US",
+    "name": "United States",
+    "locales": ["en-US"],
+    "timezones": ["America/New_York", "America/Los_Angeles", "America/Chicago"]
+  },
+  {
+    "country": "GB",
+    "name": "United Kingdom",
+    "locales": ["en-GB"],
+    "timezones": ["Europe/London"]
+  },
+  {
+    "country": "DE",
+    "name": "Germany",
+    "locales": ["de-DE"],
+    "timezones": ["Europe/Berlin"]
+  },
+  {
+    "country": "FR",
+    "name": "France",
+    "locales": ["fr-FR"],
+    "timezones": ["Europe/Paris"]
+  },
+  {
+    "country": "JP",
+    "name": "Japan",
+    "locales": ["ja-JP"],
+    "timezones": ["Asia/Tokyo"]
+  },
+  {
+    "country": "KR",
+    "name": "South Korea",
+    "locales": ["ko-KR"],
+    "timezones": ["Asia/Seoul"]
+  },
+  {
+    "country": "SG",
+    "name": "Singapore",
+    "locales": ["en-SG"],
+    "timezones": ["Asia/Singapore"]
+  },
+  {
+    "country": "BR",
+    "name": "Brazil",
+    "locales": ["pt-BR"],
+    "timezones": ["America/Sao_Paulo"]
+  },
+  {
+    "country": "IN",
+    "name": "India",
+    "locales": ["en-IN"],
+    "timezones": ["Asia/Kolkata"]
+  }
+]

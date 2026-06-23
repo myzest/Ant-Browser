@@ -27,6 +27,8 @@ export interface FingerprintConfig {
   // 屏幕与窗口
   resolution?: string      // --window-size=（预设值或 'custom'）
   customResolution?: string // 当 resolution === 'custom' 时使用
+  screenAvail?: string     // --fingerprint-screen-avail=
+  devicePixelRatio?: string // --fingerprint-device-pixel-ratio=
   colorDepth?: string      // --fingerprint-color-depth=
 
   // 硬件信息
@@ -68,6 +70,8 @@ export const KEY_MAP: Record<string, keyof FingerprintConfig> = {
   '--fingerprint-locale': 'fingerprintLocale',
   '--fingerprint-timezone': 'fingerprintTimezone',
   '--window-size': 'resolution',
+  '--fingerprint-screen-avail': 'screenAvail',
+  '--fingerprint-device-pixel-ratio': 'devicePixelRatio',
   '--fingerprint-color-depth': 'colorDepth',
   '--fingerprint-hardware-concurrency': 'hardwareConcurrency',
   '--fingerprint-device-memory': 'deviceMemory',
@@ -132,6 +136,8 @@ export function serialize(config: FingerprintConfig): string[] {
 
   const res = config.resolution === 'custom' ? config.customResolution : config.resolution
   if (res) args.push(`--window-size=${res}`)
+  if (config.screenAvail) args.push(`--fingerprint-screen-avail=${config.screenAvail}`)
+  if (config.devicePixelRatio) args.push(`--fingerprint-device-pixel-ratio=${config.devicePixelRatio}`)
 
   if (config.colorDepth) args.push(`--fingerprint-color-depth=${config.colorDepth}`)
   if (config.hardwareConcurrency) args.push(`--fingerprint-hardware-concurrency=${config.hardwareConcurrency}`)
@@ -155,7 +161,8 @@ export function serialize(config: FingerprintConfig): string[] {
 
 function applyParsedValue(config: FingerprintConfig, field: keyof FingerprintConfig, val: string) {
   if (field === 'canvasNoise' || field === 'audioNoise' || field === 'doNotTrack') {
-    ;(config as Record<string, unknown>)[field] = val === 'true'
+    const normalized = val.trim().toLowerCase()
+    ;(config as Record<string, unknown>)[field] = normalized === 'true' || normalized === '1' || normalized === 'yes' || normalized === 'on'
   } else if (field === 'resolution') {
     if (PRESET_RESOLUTIONS.includes(val)) {
       config.resolution = val
@@ -205,11 +212,6 @@ export function deserialize(args: string[]): FingerprintConfig {
   return config
 }
 
-// 生成随机指纹种子（32位正整数）
-export function randomFingerprintSeed(): string {
-  return String(Math.floor(Math.random() * 2147483647) + 1)
-}
-
 // ─── 预设指纹配置 ────────────────────────────────────────────────────────────
 
 export interface FingerprintPreset {
@@ -230,6 +232,8 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       lang: 'zh-CN',
       timezone: 'Asia/Shanghai',
       resolution: '1920,1080',
+      screenAvail: '1920,1040',
+      devicePixelRatio: '1',
       colorDepth: '24',
       hardwareConcurrency: '8',
       deviceMemory: '8',
@@ -254,6 +258,8 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       lang: 'en-US',
       timezone: 'America/New_York',
       resolution: '2560,1440',
+      screenAvail: '2560,1400',
+      devicePixelRatio: '1',
       colorDepth: '24',
       hardwareConcurrency: '16',
       deviceMemory: '16',
@@ -278,6 +284,8 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       lang: 'zh-CN',
       timezone: 'Asia/Shanghai',
       resolution: '2560,1440',
+      screenAvail: '2560,1366',
+      devicePixelRatio: '2',
       colorDepth: '30',
       hardwareConcurrency: '10',
       deviceMemory: '16',
@@ -302,6 +310,8 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       lang: 'zh-CN',
       timezone: 'Asia/Shanghai',
       resolution: '1366,768',
+      screenAvail: '1366,728',
+      devicePixelRatio: '1',
       colorDepth: '24',
       hardwareConcurrency: '4',
       deviceMemory: '4',
@@ -326,6 +336,8 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       lang: 'en-US',
       timezone: 'America/Los_Angeles',
       resolution: '1920,1080',
+      screenAvail: '1920,1040',
+      devicePixelRatio: '1',
       colorDepth: '24',
       hardwareConcurrency: '8',
       deviceMemory: '8',
@@ -341,15 +353,17 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
     },
   },
   {
-    id: 'mac-safari-jp',
-    name: 'macOS / Safari / 日本用户',
-    description: '模拟日本 Mac 用户，Safari 风格，日语环境',
+    id: 'mac-chrome-jp',
+    name: 'macOS / Chrome / 日本用户',
+    description: '模拟日本 Mac 用户，Chrome 风格，日语环境',
     config: {
-      brand: 'Safari',
+      brand: 'Chrome',
       platform: 'mac',
       lang: 'ja-JP',
       timezone: 'Asia/Tokyo',
       resolution: '1440,900',
+      screenAvail: '1440,826',
+      devicePixelRatio: '2',
       colorDepth: '24',
       hardwareConcurrency: '8',
       deviceMemory: '8',
@@ -374,6 +388,8 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       lang: 'en-GB',
       timezone: 'Europe/London',
       resolution: '1920,1080',
+      screenAvail: '1920,1040',
+      devicePixelRatio: '1',
       colorDepth: '24',
       hardwareConcurrency: '8',
       deviceMemory: '8',

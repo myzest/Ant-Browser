@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, RefreshCw, ShieldCheck, Wand2 } from 'lucide-react'
+import { ChevronDown, ChevronUp, RefreshCw, RotateCcw, ShieldCheck, Wand2 } from 'lucide-react'
 import { Button, ConfirmModal, FormItem, Input, Select, Textarea, toast } from '../../../shared/components'
 import { generateFingerprintProfile, validateFingerprintProfile } from '../api/fingerprint'
 import type { FingerprintHealthReport } from '../types'
@@ -9,21 +9,21 @@ import {
   PRESET_RESOLUTIONS,
   deserialize,
   getSystemTimezone,
-  randomFingerprintSeed,
   serialize,
 } from '../utils/fingerprintSerializer'
 
 interface FingerprintPanelProps {
   value: string[]
   onChange: (args: string[]) => void
+  profileId?: string
+  proxyId?: string
+  proxyConfig?: string
 }
 
 const BRAND_OPTIONS = [
   { value: '', label: '不设置' },
   { value: 'Chrome', label: 'Chrome' },
   { value: 'Edge', label: 'Edge' },
-  { value: 'Firefox', label: 'Firefox' },
-  { value: 'Safari', label: 'Safari' },
 ]
 
 const PLATFORM_OPTIONS = [
@@ -42,6 +42,8 @@ const LANG_OPTIONS = [
   { value: 'ko-KR', label: '한국어 (ko-KR)' },
   { value: 'fr-FR', label: 'Français (fr-FR)' },
   { value: 'de-DE', label: 'Deutsch (de-DE)' },
+  { value: 'pt-BR', label: 'Português (pt-BR)' },
+  { value: 'en-IN', label: 'English (en-IN)' },
 ]
 
 const TIMEZONE_OPTIONS = [
@@ -189,24 +191,60 @@ const COUNTRY_OPTIONS = [
   { value: 'JP', label: '日本' },
   { value: 'KR', label: '韩国' },
   { value: 'SG', label: '新加坡' },
+  { value: 'BR', label: '巴西' },
+  { value: 'IN', label: '印度' },
+]
+
+const REGION_MODE_OPTIONS = [
+  { value: 'manual', label: '手动地区' },
+  { value: 'proxy', label: '跟随代理' },
+  { value: 'system', label: '跟随系统' },
 ]
 
 function fingerprintHealthLabel(health: FingerprintHealthReport): string {
   const statusLabel = health.status === 'red' ? '本地预检高风险' : health.status === 'yellow' ? '本地预检需复核' : '本地预检通过'
   const issueCount = health.issues?.length || 0
-  return `${statusLabel} · ${issueCount > 0 ? `${issueCount} 个风险项` : '无风险项'}`
+  return `${statusLabel} · ${issueCount} 个风险项`
 }
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error && error.message ? error.message : fallback
 }
 
-export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
+function dimensionStatus(health: FingerprintHealthReport, fields: string[]): 'green' | 'yellow' | 'red' {
+  let status: 'green' | 'yellow' | 'red' = 'green'
+  for (const issue of health.issues || []) {
+    if (!fields.some(field => issue.field === field || issue.field.includes(field) || field.includes(issue.field))) continue
+    if (issue.severity === 'red') return 'red'
+    if (issue.severity === 'yellow') status = 'yellow'
+  }
+  return status
+}
+
+function healthDimensions(health: FingerprintHealthReport) {
+  return [
+    { label: '平台', status: dimensionStatus(health, ['--fingerprint-platform', '--fingerprint-brand', '--user-agent']) },
+    { label: '字体', status: dimensionStatus(health, ['--fingerprint-fonts']) },
+    { label: 'WebGL', status: dimensionStatus(health, ['--fingerprint-webgl']) },
+    { label: '语言/时区', status: dimensionStatus(health, ['--lang', '--fingerprint-locale', '--timezone', '--fingerprint-timezone']) },
+    { label: 'WebRTC', status: dimensionStatus(health, ['--fingerprint-webrtc-ip', '--webrtc-ip-handling-policy']) },
+    { label: 'Seed', status: dimensionStatus(health, ['--fingerprint']) },
+  ]
+}
+
+function dimensionClass(status: 'green' | 'yellow' | 'red') {
+  if (status === 'red') return 'text-red-600 border-red-200 bg-red-50'
+  if (status === 'yellow') return 'text-amber-700 border-amber-200 bg-amber-50'
+  return 'text-green-600 border-green-200 bg-green-50'
+}
+
+export function FingerprintPanel({ value, onChange, profileId, proxyId, proxyConfig }: FingerprintPanelProps) {
   const [config, setConfig] = useState<FingerprintConfig>(() => deserialize(value))
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [customRendererOpen, setCustomRendererOpen] = useState(false)
   const [confirmSeedOpen, setConfirmSeedOpen] = useState(false)
   const [quickPlatform, setQuickPlatform] = useState('windows')
+  const [regionMode, setRegionMode] = useState<'manual' | 'proxy' | 'system'>('manual')
   const [quickCountry, setQuickCountry] = useState('CN')
   const [quickDevice, setQuickDevice] = useState('office')
   const [generating, setGenerating] = useState(false)
@@ -240,7 +278,6 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
     // 应用预设时自动生成新种子，保留未知参数
     const next: FingerprintConfig = {
       ...preset.config,
-      seed: randomFingerprintSeed(),
       unknownArgs: config.unknownArgs,
     }
     setConfig(next)
@@ -260,19 +297,25 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
     onChange(serialize(parsed))
   }
 
-  const handleGenerate = async () => {
+  const runGenerate = async (options?: { regenerateSeed?: boolean; resetCurrent?: boolean }) => {
     if (generating || validating) return
     setGenerating(true)
     try {
       const region = regionForCountry(quickCountry)
+      const manualRegion = regionMode === 'manual'
       const result = await generateFingerprintProfile({
-        currentArgs: serialize(config),
+        currentArgs: options?.resetCurrent ? [] : serialize(config),
+        profileId,
         platform: quickPlatform,
-        country: quickCountry,
-        locale: region.locale,
-        timezone: region.timezone,
+        regionMode,
+        country: manualRegion ? quickCountry : undefined,
+        locale: manualRegion ? region.locale : undefined,
+        timezone: manualRegion ? region.timezone : undefined,
         deviceClass: quickDevice,
+        proxyId,
+        proxyConfig,
         preserveUnknownArgs: true,
+        regenerateSeed: options?.regenerateSeed,
       })
       const parsed = deserialize(result.args || [])
       setConfig(parsed)
@@ -290,12 +333,16 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
     }
   }
 
+  const handleGenerate = async () => {
+    await runGenerate()
+  }
+
   const handleValidate = async () => {
     if (generating || validating) return
     setValidating(true)
     try {
       const args = serialize(config)
-      setHealth(await validateFingerprintProfile({ args }))
+      setHealth(await validateFingerprintProfile({ args, proxyId, proxyConfig }))
       setHealthArgsKey(args.join('\n'))
     } catch (error) {
       setHealth(null)
@@ -340,7 +387,7 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
               if (config.seed) {
                 setConfirmSeedOpen(true)
               } else {
-                update({ seed: randomFingerprintSeed() })
+                void runGenerate({ regenerateSeed: true })
               }
             }}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs bg-[var(--color-primary)] text-white hover:opacity-90 transition-opacity shrink-0"
@@ -354,7 +401,7 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
       <ConfirmModal
         open={confirmSeedOpen}
         onClose={() => setConfirmSeedOpen(false)}
-        onConfirm={() => update({ seed: randomFingerprintSeed() })}
+        onConfirm={() => { setConfirmSeedOpen(false); void runGenerate({ regenerateSeed: true }) }}
         title="重新生成指纹种子"
         content="重新生成后，当前指纹将完全改变，浏览器的 Canvas、WebGL、Audio 等所有噪声特征都会随之变化。确定继续？"
         confirmText="确定重新生成"
@@ -375,12 +422,15 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
       </div>
 
       <div className="p-3 rounded-lg bg-[var(--color-bg-hover)] border border-[var(--color-border)] space-y-3">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <FormItem label="平台">
             <Select value={quickPlatform} onChange={e => setQuickPlatform(e.target.value)} options={PLATFORM_OPTIONS.filter(option => option.value)} />
           </FormItem>
+          <FormItem label="地区模式">
+            <Select value={regionMode} onChange={e => setRegionMode(e.target.value as 'manual' | 'proxy' | 'system')} options={REGION_MODE_OPTIONS} />
+          </FormItem>
           <FormItem label="地区">
-            <Select value={quickCountry} onChange={e => setQuickCountry(e.target.value)} options={COUNTRY_OPTIONS} />
+            <Select value={quickCountry} onChange={e => setQuickCountry(e.target.value)} options={COUNTRY_OPTIONS} disabled={regionMode === 'system'} />
           </FormItem>
           <FormItem label="设备类型">
             <Select value={quickDevice} onChange={e => setQuickDevice(e.target.value)} options={DEVICE_CLASS_OPTIONS} />
@@ -390,6 +440,10 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
           <Button type="button" size="sm" onClick={() => void handleGenerate()} loading={generating} disabled={busy}>
             <Wand2 className="w-3.5 h-3.5" />
             生成指纹
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => void runGenerate({ resetCurrent: true, regenerateSeed: true })} loading={generating} disabled={busy}>
+            <RotateCcw className="w-3.5 h-3.5" />
+            恢复推荐值
           </Button>
           <Button type="button" size="sm" variant="secondary" onClick={() => void handleValidate()} loading={validating} disabled={busy}>
             <ShieldCheck className="w-3.5 h-3.5" />
@@ -407,6 +461,15 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
             </span>
           )}
         </div>
+        {currentHealth && (
+          <div className="flex flex-wrap gap-1.5">
+            {healthDimensions(currentHealth).map(item => (
+              <span key={item.label} className={`text-xs px-2 py-0.5 rounded border ${dimensionClass(item.status)}`}>
+                {item.label}
+              </span>
+            ))}
+          </div>
+        )}
         {currentHealth && currentHealth.issues?.length > 0 && (
           <div className="space-y-1">
             {currentHealth.issues.slice(0, 3).map(issue => (
@@ -466,6 +529,12 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
           )}
           <FormItem label="色深">
             <Select value={config.colorDepth ?? ''} onChange={e => update({ colorDepth: e.target.value || undefined })} options={COLOR_DEPTH_OPTIONS} />
+          </FormItem>
+          <FormItem label="可用屏幕区域">
+            <Input value={config.screenAvail ?? ''} onChange={e => update({ screenAvail: e.target.value || undefined })} placeholder="1920,1040" />
+          </FormItem>
+          <FormItem label="DPR">
+            <Input value={config.devicePixelRatio ?? ''} onChange={e => update({ devicePixelRatio: e.target.value || undefined })} placeholder="1 或 2" />
           </FormItem>
           <FormItem label="CPU 核心数">
             <Select value={config.hardwareConcurrency ?? ''} onChange={e => update({ hardwareConcurrency: e.target.value || undefined })} options={HARDWARE_CONCURRENCY_OPTIONS} />
@@ -626,6 +695,8 @@ function countryFromLocaleTimezone(locale?: string, timezone?: string): string {
   if (value.includes('ja-jp') || value.includes('asia/tokyo')) return 'JP'
   if (value.includes('ko-kr') || value.includes('asia/seoul')) return 'KR'
   if (value.includes('en-sg') || value.includes('asia/singapore')) return 'SG'
+  if (value.includes('pt-br') || value.includes('america/sao_paulo')) return 'BR'
+  if (value.includes('en-in') || value.includes('asia/kolkata')) return 'IN'
   if (value.includes('zh-cn') || value.includes('asia/shanghai')) return 'CN'
   return ''
 }
@@ -646,6 +717,10 @@ function regionForCountry(country: string) {
       return { locale: 'ko-KR', timezone: 'Asia/Seoul' }
     case 'SG':
       return { locale: 'en-SG', timezone: 'Asia/Singapore' }
+    case 'BR':
+      return { locale: 'pt-BR', timezone: 'America/Sao_Paulo' }
+    case 'IN':
+      return { locale: 'en-IN', timezone: 'Asia/Kolkata' }
     case 'CN':
     default:
       return { locale: 'zh-CN', timezone: 'Asia/Shanghai' }

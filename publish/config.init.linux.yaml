@@ -14,6 +14,17 @@ app:
 runtime:
   max_memory_mb: 1024
   gc_percent: 100
+geoip:
+  enabled: false
+  provider: maxmind
+  edition_id: GeoLite2-City
+  account_id: "${MAXMIND_ACCOUNT_ID}"
+  license_key: "${MAXMIND_LICENSE_KEY}"
+  database_path: ""
+  cache_dir: data/geoip
+  auto_update: true
+  max_age_days: 30
+  timeout_ms: 15000
 logging:
   level: info
   file_enabled: false
@@ -46,18 +57,21 @@ browser:
     - --timezone=Asia/Shanghai
     - --fingerprint-timezone=Asia/Shanghai
     - --window-size=1920,1080
+    - --fingerprint-screen-avail=1920,1000
+    - --fingerprint-device-pixel-ratio=1
     - --fingerprint-color-depth=24
     - --fingerprint-hardware-concurrency=8
     - --fingerprint-device-memory=8
     - --fingerprint-canvas-noise=true
     - --fingerprint-audio-noise=true
     - --fingerprint-webgl-vendor=Intel
-    - --fingerprint-webgl-renderer=Intel(R) UHD Graphics 630
-    - --fingerprint-fonts=Arial,Noto Sans,Noto Sans CJK SC,Liberation Sans,DejaVu Sans,Times New Roman
+    - --fingerprint-webgl-renderer=Mesa Intel(R) UHD Graphics 620
+    - --fingerprint-fonts=Arimo,Cousine,Tinos,Noto Sans,Noto Sans CJK SC,Noto Color Emoji
     - --webrtc-ip-handling-policy=disable_non_proxied_udp
     - --fingerprint-webrtc-ip=auto
     - --fingerprint-do-not-track=false
     - --fingerprint-touch-points=0
+    - --fingerprint-media-devices=0,1,1
   default_launch_args:
     - --disable-sync
     - --no-first-run

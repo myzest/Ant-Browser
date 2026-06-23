@@ -536,6 +536,12 @@ UI 可展示“指纹健康度”：
 - 使用中国代理时，默认生成 `zh-CN` 和 `Asia/Shanghai`。
 - 失败时不阻塞启动，但在 UI/日志提示。
 
+当前落地状态：
+
+- 已落地参数层闭环：代理 IP 健康检测结果会缓存出口 IP、国家、地区、城市，并回写到代理配置；生成指纹时 `regionMode=proxy` 会优先使用该缓存推导 `--lang`、`--fingerprint-locale`、`--timezone`、`--fingerprint-timezone` 和 `--fingerprint-webrtc-ip`。
+- 已落地失败降级：WebRTC 出口 IP 解析失败或直连时会移除 `--fingerprint-webrtc-ip=auto`，避免把 `auto` 直接交给内核。
+- 已接入 GeoIP DB 能力：新增 `geoip` 配置，支持本地 `.mmdb` 路径，或使用 MaxMind 官方 `account_id/license_key` 下载 GeoLite2-City 到本地缓存；代理健康检测会用出口 IP 补齐国家、地区、城市、timezone，并反哺代理配置与指纹生成。Geolocation 原生 API、Storage quota 仍归入 Chromium patch / 能力探测阶段。
+
 ### P3：行为人类化
 
 目标：降低自动化行为检测异常。

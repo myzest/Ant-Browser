@@ -1,0 +1,25 @@
+{
+  "windows": [
+    {"vendor": "Intel", "renderer": "Intel(R) UHD Graphics 630"},
+    {"vendor": "Intel", "renderer": "Intel(R) UHD Graphics 620"},
+    {"vendor": "Intel", "renderer": "Intel(R) HD Graphics 520"},
+    {"vendor": "Intel", "renderer": "Intel(R) Iris(R) Xe Graphics"},
+    {"vendor": "NVIDIA", "renderer": "NVIDIA GeForce RTX 3080"},
+    {"vendor": "NVIDIA", "renderer": "NVIDIA GeForce RTX 3060"},
+    {"vendor": "NVIDIA", "renderer": "NVIDIA GeForce GTX 1660"},
+    {"vendor": "NVIDIA", "renderer": "NVIDIA GeForce GTX 1080 Ti"},
+    {"vendor": "AMD", "renderer": "AMD Radeon RX 6600"},
+    {"vendor": "AMD", "renderer": "AMD Radeon RX 580"}
+  ],
+  "mac": [
+    {"vendor": "Apple", "renderer": "Apple M1"},
+    {"vendor": "Apple", "renderer": "Apple M2"},
+    {"vendor": "Apple", "renderer": "Apple M3"},
+    {"vendor": "Apple", "renderer": "Apple GPU"}
+  ],
+  "linux": [
+    {"vendor": "Intel", "renderer": "Mesa Intel(R) UHD Graphics 620"},
+    {"vendor": "Intel", "renderer": "Mesa Intel(R) HD Graphics 520"},
+    {"vendor": "AMD", "renderer": "Mesa AMD Radeon Graphics"}
+  ]
+}

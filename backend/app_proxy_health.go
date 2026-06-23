@@ -1,9 +1,15 @@
 package backend
 
 import (
+	"ant-chrome/backend/internal/config"
+	"ant-chrome/backend/internal/fingerprint"
+	"ant-chrome/backend/internal/geoip"
 	"ant-chrome/backend/internal/proxy"
+	"context"
 	"encoding/json"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -77,6 +83,7 @@ func (a *App) BrowserProxyBatchTestSpeed(proxyIds []string, concurrency int) []P
 func (a *App) BrowserProxyCheckIPHealth(proxyId string) ProxyIPHealthResult {
 	proxies := a.getLatestProxies()
 	data, err := proxy.FetchIPHealthInfo(proxyId, proxies, a.xrayMgr, a.singboxMgr, a.proxyIPHealthConfig())
+	data = a.enrichProxyIPHealthWithGeoIP(data)
 	result := buildProxyIPHealthResult(proxyId, data, err)
 	a.persistProxyIPHealthResult(result)
 	if a.ctx != nil {
@@ -112,6 +119,7 @@ func (a *App) BrowserProxyBatchCheckIPHealth(proxyIds []string, concurrency int)
 			defer wg.Done()
 			for job := range jobs {
 				data, err := proxy.FetchIPHealthInfo(job.ProxyId, proxies, a.xrayMgr, a.singboxMgr, a.proxyIPHealthConfig())
+				data = a.enrichProxyIPHealthWithGeoIP(data)
 				result := buildProxyIPHealthResult(job.ProxyId, data, err)
 				a.persistProxyIPHealthResult(result)
 				results[job.Idx] = result
@@ -148,7 +156,7 @@ func buildProxyIPHealthResult(proxyId string, data map[string]interface{}, err e
 		}
 	}
 
-	return ProxyIPHealthResult{
+	result := ProxyIPHealthResult{
 		ProxyId:        proxyId,
 		Ok:             true,
 		Source:         mapStringDefault(data, "_source", "ip_health"),
@@ -160,10 +168,13 @@ func buildProxyIPHealthResult(proxyId string, data map[string]interface{}, err e
 		Country:        mapString(data, "country"),
 		Region:         mapString(data, "region"),
 		City:           mapString(data, "city"),
+		Timezone:       mapString(data, "timezone"),
+		Locale:         mapString(data, "locale"),
 		AsOrganization: mapString(data, "asOrganization"),
 		RawData:        data,
 		UpdatedAt:      time.Now().Format(time.RFC3339),
 	}
+	return proxyIPHealthResultWithRegionDefaults(result)
 }
 
 func mapStringDefault(data map[string]interface{}, key string, fallback string) string {
@@ -178,11 +189,98 @@ func (a *App) persistProxyIPHealthResult(result ProxyIPHealthResult) {
 	if a.browserMgr.ProxyDAO == nil {
 		return
 	}
+	result = proxyIPHealthResultWithRegionDefaults(result)
 	payload, err := json.Marshal(result)
 	if err != nil {
 		return
 	}
 	_ = a.browserMgr.ProxyDAO.UpdateIPHealthResult(result.ProxyId, string(payload))
+	if result.Ok && strings.TrimSpace(result.Country) != "" {
+		if proxyItem, ok := a.browserMgr.GetProxyByID(result.ProxyId); ok {
+			proxyItem.Country = strings.TrimSpace(result.Country)
+			proxyItem.Region = strings.TrimSpace(result.Region)
+			proxyItem.City = strings.TrimSpace(result.City)
+			if strings.TrimSpace(result.Locale) != "" && (!result.localeFromRegionDefault || strings.TrimSpace(proxyItem.Locale) == "") {
+				proxyItem.Locale = strings.TrimSpace(result.Locale)
+			}
+			if strings.TrimSpace(result.Timezone) != "" && (!result.timezoneFromRegionDefault || strings.TrimSpace(proxyItem.Timezone) == "") {
+				proxyItem.Timezone = strings.TrimSpace(result.Timezone)
+			}
+			locale, timezone, _ := fingerprint.RegionDefaults(proxyItem.Country, proxyItem.Locale, proxyItem.Timezone)
+			if strings.TrimSpace(proxyItem.Locale) == "" {
+				proxyItem.Locale = locale
+			}
+			if strings.TrimSpace(proxyItem.Timezone) == "" {
+				proxyItem.Timezone = timezone
+			}
+			_ = a.browserMgr.ProxyDAO.Upsert(proxyItem)
+			_ = a.browserMgr.ProxyDAO.UpdateIPHealthResult(result.ProxyId, string(payload))
+		}
+	}
+}
+
+func proxyIPHealthResultWithRegionDefaults(result ProxyIPHealthResult) ProxyIPHealthResult {
+	if !result.Ok || strings.TrimSpace(result.Country) == "" {
+		return result
+	}
+	locale, timezone, _ := fingerprint.RegionDefaults(result.Country, result.Locale, result.Timezone)
+	if strings.TrimSpace(result.Locale) == "" && strings.TrimSpace(locale) != "" {
+		result.Locale = strings.TrimSpace(locale)
+		result.localeFromRegionDefault = true
+		setRawStringIfEmpty(result.RawData, "locale", result.Locale)
+	}
+	if strings.TrimSpace(result.Timezone) == "" && strings.TrimSpace(timezone) != "" {
+		result.Timezone = strings.TrimSpace(timezone)
+		result.timezoneFromRegionDefault = true
+		setRawStringIfEmpty(result.RawData, "timezone", result.Timezone)
+	}
+	return result
+}
+
+func (a *App) enrichProxyIPHealthWithGeoIP(data map[string]interface{}) map[string]interface{} {
+	if data == nil || a == nil || a.config == nil || !geoip.Enabled(a.config.GeoIP) {
+		return data
+	}
+	ip := strings.TrimSpace(mapString(data, "ip"))
+	if ip == "" || geoIPLocationFieldsComplete(data) {
+		return data
+	}
+	cfg := a.resolvedGeoIPConfig()
+	service := geoip.NewService(cfg, cfg.CacheDir)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cfg.TimeoutMs)*time.Millisecond)
+	defer cancel()
+	result, err := service.Lookup(ctx, ip)
+	if err != nil {
+		if data == nil {
+			data = map[string]interface{}{}
+		}
+		data["_geoip_error"] = err.Error()
+		return data
+	}
+	data = geoip.EnrichMap(data, result)
+	return data
+}
+
+func (a *App) resolvedGeoIPConfig() config.GeoIPConfig {
+	cfg := a.config.GeoIP
+	cfg.DatabasePath = a.resolveGeoIPPath(cfg.DatabasePath)
+	cfg.CacheDir = a.resolveGeoIPPath(cfg.CacheDir)
+	return cfg
+}
+
+func (a *App) resolveGeoIPPath(path string) string {
+	path = strings.TrimSpace(os.ExpandEnv(path))
+	if path == "" || filepath.IsAbs(path) {
+		return path
+	}
+	return a.resolveAppPath(path)
+}
+
+func geoIPLocationFieldsComplete(data map[string]interface{}) bool {
+	return strings.TrimSpace(mapString(data, "country")) != "" &&
+		strings.TrimSpace(mapString(data, "region")) != "" &&
+		strings.TrimSpace(mapString(data, "city")) != "" &&
+		strings.TrimSpace(mapString(data, "timezone")) != ""
 }
 
 func mapString(data map[string]interface{}, key string) string {
@@ -195,6 +293,15 @@ func mapString(data map[string]interface{}, key string) string {
 		return item
 	default:
 		return fmt.Sprint(value)
+	}
+}
+
+func setRawStringIfEmpty(data map[string]interface{}, key string, value string) {
+	if data == nil || strings.TrimSpace(value) == "" {
+		return
+	}
+	if strings.TrimSpace(mapString(data, key)) == "" {
+		data[key] = strings.TrimSpace(value)
 	}
 }
 

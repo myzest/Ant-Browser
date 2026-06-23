@@ -124,18 +124,18 @@ func (a *App) migrateToSQLite() {
 		} else {
 			log.Info("实例表为空，自动创建默认实例")
 			defaultProfile := &browser.Profile{
-				ProfileId:       generateUUID(),
-				ProfileName:     "默认实例",
-				UserDataDir:     "default",
-				CoreId:          "",
-				FingerprintArgs: a.config.Browser.DefaultFingerprintArgs,
-				LaunchArgs:      a.config.Browser.DefaultLaunchArgs,
-				Tags:            []string{"默认"},
-				ProxyId:         "__direct__",
-				ProxyConfig:     "direct://",
-				CreatedAt:       time.Now().Format(time.RFC3339),
-				UpdatedAt:       time.Now().Format(time.RFC3339),
+				ProfileId:   generateUUID(),
+				ProfileName: "默认实例",
+				UserDataDir: "default",
+				CoreId:      "",
+				LaunchArgs:  a.config.Browser.DefaultLaunchArgs,
+				Tags:        []string{"默认"},
+				ProxyId:     "__direct__",
+				ProxyConfig: "direct://",
+				CreatedAt:   time.Now().Format(time.RFC3339),
+				UpdatedAt:   time.Now().Format(time.RFC3339),
 			}
+			defaultProfile.FingerprintArgs = a.browserMgr.DefaultFingerprintArgsForProfile(defaultProfile.ProfileId, nil, a.config.Browser.DefaultFingerprintArgs, "")
 			if err := a.browserMgr.ProfileDAO.Upsert(defaultProfile); err != nil {
 				log.Error("自动创建默认实例失败", logger.F("error", err))
 			}
@@ -145,12 +145,7 @@ func (a *App) migrateToSQLite() {
 	if bookmarks, err := a.browserMgr.BookmarkDAO.List(); err == nil && len(bookmarks) == 0 {
 		src := a.config.Browser.DefaultBookmarks
 		if len(src) == 0 {
-			src = []config.BrowserBookmark{
-				{Name: "Google", URL: "https://www.google.com/"},
-				{Name: "Fingerprint", URL: "https://demo.fingerprint.com/playground"},
-				{Name: "Gmail", URL: "https://mail.google.com/"},
-				{Name: "ChatGPT", URL: "https://chatgpt.com/"},
-			}
+			src = defaultBookmarkList
 		}
 		if err := a.browserMgr.BookmarkDAO.ReplaceAll(src); err != nil {
 			log.Error("书签迁移失败", logger.F("error", err))

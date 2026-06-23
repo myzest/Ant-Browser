@@ -751,6 +751,28 @@ func TestResolveAutoWebRTCIPLaunchArgRemovesSplitAutoOnResolutionFailure(t *test
 	}
 }
 
+func TestResolveAutoWebRTCIPLaunchArgReplacesAutoOnSuccess(t *testing.T) {
+	original := resolveFingerprintExitIP
+	resolveFingerprintExitIP = func(proxyURL string, cacheKey string, timeout time.Duration) (string, error) {
+		if proxyURL != "http://127.0.0.1:18080" {
+			t.Fatalf("unexpected proxy URL: %q", proxyURL)
+		}
+		if cacheKey != "proxy-cache" {
+			t.Fatalf("unexpected cache key: %q", cacheKey)
+		}
+		return "203.0.113.77", nil
+	}
+	defer func() { resolveFingerprintExitIP = original }()
+
+	app := &App{}
+	args := []string{"--fingerprint=111", "--fingerprint-webrtc-ip=auto", "--lang=zh-CN"}
+	got := app.resolveAutoWebRTCIPLaunchArgWithCacheKey("profile-proxy", args, "http://127.0.0.1:18080", "proxy-cache")
+	want := []string{"--fingerprint=111", "--fingerprint-webrtc-ip=203.0.113.77", "--lang=zh-CN"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveAutoWebRTCIPLaunchArg success mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
 func containsLaunchArg(args []string, want string) bool {
 	for _, arg := range args {
 		if arg == want {

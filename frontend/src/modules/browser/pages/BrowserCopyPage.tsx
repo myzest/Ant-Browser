@@ -4,6 +4,23 @@ import { Button, Card, FormItem, Input, Select, toast } from '../../../shared/co
 import type { BrowserProfile } from '../types'
 import { createBrowserProfile, fetchBrowserProfiles } from '../api'
 
+function fingerprintArgsForCopy(args: string[]): string[] {
+  const out: string[] = []
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]?.trim() || ''
+    const key = arg.includes('=') ? arg.slice(0, arg.indexOf('=')) : arg
+    if (key === '--fingerprint') {
+      const next = args[i + 1]?.trim() || ''
+      if (!arg.includes('=') && next && !next.startsWith('-')) {
+        i += 1
+      }
+      continue
+    }
+    if (arg) out.push(arg)
+  }
+  return out
+}
+
 export function BrowserCopyPage() {
   const { id } = useParams()
   const navigate = useNavigate()
@@ -36,7 +53,7 @@ export function BrowserCopyPage() {
         profileName: targetName,
         userDataDir: `${sourceProfile.userDataDir}-copy`,
         coreId: sourceProfile.coreId,
-        fingerprintArgs: sourceProfile.fingerprintArgs,
+        fingerprintArgs: fingerprintArgsForCopy(sourceProfile.fingerprintArgs),
         proxyId: sourceProfile.proxyId,
         proxyConfig: sourceProfile.proxyConfig,
         launchArgs: sourceProfile.launchArgs,

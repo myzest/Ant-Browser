@@ -277,6 +277,8 @@ export namespace backend {
 	    country: string;
 	    region: string;
 	    city: string;
+	    timezone: string;
+	    locale: string;
 	    asOrganization: string;
 	    rawData: Record<string, any>;
 	    updatedAt: string;
@@ -298,6 +300,8 @@ export namespace backend {
 	        this.country = source["country"];
 	        this.region = source["region"];
 	        this.city = source["city"];
+	        this.timezone = source["timezone"];
+	        this.locale = source["locale"];
 	        this.asOrganization = source["asOrganization"];
 	        this.rawData = source["rawData"];
 	        this.updatedAt = source["updatedAt"];
@@ -792,6 +796,11 @@ export namespace config {
 	    proxyId: string;
 	    proxyName: string;
 	    proxyConfig: string;
+	    country?: string;
+	    region?: string;
+	    city?: string;
+	    timezone?: string;
+	    locale?: string;
 	    dnsServers?: string;
 	    groupName?: string;
 	    sortOrder?: number;
@@ -815,6 +824,11 @@ export namespace config {
 	        this.proxyId = source["proxyId"];
 	        this.proxyName = source["proxyName"];
 	        this.proxyConfig = source["proxyConfig"];
+	        this.country = source["country"];
+	        this.region = source["region"];
+	        this.city = source["city"];
+	        this.timezone = source["timezone"];
+	        this.locale = source["locale"];
 	        this.dnsServers = source["dnsServers"];
 	        this.groupName = source["groupName"];
 	        this.sortOrder = source["sortOrder"];

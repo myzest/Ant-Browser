@@ -2,12 +2,13 @@ package browser
 
 import (
 	"ant-chrome/backend/internal/fingerprint"
+	"strconv"
 	"strings"
 )
 
 func (m *Manager) defaultFingerprintArgsForProfile(profileID string, input []string, baseArgs []string, preferredPlatform string) []string {
 	if len(input) > 0 {
-		return append([]string{}, input...)
+		return ensureProfileFingerprintSeedIfMissing(profileID, input)
 	}
 
 	if len(baseArgs) == 0 && m != nil && m.Config != nil {
@@ -24,11 +25,16 @@ func (m *Manager) defaultFingerprintArgsForProfile(profileID string, input []str
 		Platform:  platform,
 		Locale:    locale,
 		Timezone:  timezone,
+		Seed:      fingerprint.StableSeed(profileID),
 	})
 	if err == nil {
-		return mergeFingerprintArgs(fingerprint.Args(profile), baseArgs)
+		return ensureProfileFingerprintSeed(profileID, mergeFingerprintArgs(fingerprint.Args(profile), baseArgs))
 	}
-	return withoutFingerprintSeed(baseArgs)
+	return ensureProfileFingerprintSeed(profileID, withoutFingerprintSeed(baseArgs))
+}
+
+func (m *Manager) DefaultFingerprintArgsForProfile(profileID string, input []string, baseArgs []string, preferredPlatform string) []string {
+	return m.defaultFingerprintArgsForProfile(profileID, input, baseArgs, preferredPlatform)
 }
 
 func platformFromFingerprintArgs(args []string) string {
@@ -37,6 +43,26 @@ func platformFromFingerprintArgs(args []string) string {
 
 func mergeFingerprintArgs(generated []string, base []string) []string {
 	return mergeKnownFingerprintArgs(withoutFingerprintSeed(generated), withoutFingerprintSeed(base))
+}
+
+func ensureProfileFingerprintSeed(profileID string, args []string) []string {
+	out := withoutFingerprintSeed(args)
+	seed := fingerprint.SeedArg(profileID)
+	return append([]string{seed}, out...)
+}
+
+func ensureProfileFingerprintSeedIfMissing(profileID string, args []string) []string {
+	for _, arg := range args {
+		if fingerprintArgKey(arg) == "--fingerprint" {
+			values := fingerprint.ParseArgs(args)
+			seed := strings.TrimSpace(values["--fingerprint"])
+			if parsed, err := strconv.ParseInt(seed, 10, 64); err == nil && parsed > 0 {
+				return append([]string{}, args...)
+			}
+			return ensureProfileFingerprintSeed(profileID, args)
+		}
+	}
+	return append([]string{fingerprint.SeedArg(profileID)}, args...)
 }
 
 func mergeKnownFingerprintArgs(groups ...[]string) []string {

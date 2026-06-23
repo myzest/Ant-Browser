@@ -214,6 +214,27 @@ WHERE NOT EXISTS (
 				}
 			}
 		}
+		if item.name == "browser_proxies" {
+			hasCountry, err := backupSrcColumnExists(tx, item.name, "country")
+			if err != nil {
+				return err
+			}
+			if hasCountry {
+				if resetFirst {
+					sqlText = `INSERT INTO browser_proxies (proxy_id, proxy_name, proxy_config, dns_servers, country, region, city, timezone, locale, group_name, source_id, source_url, source_name_prefix, source_auto_refresh, source_refresh_interval_m, source_last_refresh_at, last_latency_ms, last_test_ok, last_tested_at, last_ip_health_json, sort_order, created_at)
+SELECT proxy_id, proxy_name, proxy_config, dns_servers, COALESCE(country,''), COALESCE(region,''), COALESCE(city,''), COALESCE(timezone,''), COALESCE(locale,''), COALESCE(group_name,''), COALESCE(source_id,''), COALESCE(source_url,''), COALESCE(source_name_prefix,''), COALESCE(source_auto_refresh,0), COALESCE(source_refresh_interval_m,0), COALESCE(source_last_refresh_at,''), COALESCE(last_latency_ms,-1), COALESCE(last_test_ok,0), COALESCE(last_tested_at,''), COALESCE(last_ip_health_json,''), sort_order, created_at
+FROM src.browser_proxies`
+				} else {
+					sqlText = `INSERT INTO browser_proxies (proxy_id, proxy_name, proxy_config, dns_servers, country, region, city, timezone, locale, group_name, source_id, source_url, source_name_prefix, source_auto_refresh, source_refresh_interval_m, source_last_refresh_at, last_latency_ms, last_test_ok, last_tested_at, last_ip_health_json, sort_order, created_at)
+SELECT s.proxy_id, s.proxy_name, s.proxy_config, s.dns_servers, COALESCE(s.country,''), COALESCE(s.region,''), COALESCE(s.city,''), COALESCE(s.timezone,''), COALESCE(s.locale,''), COALESCE(s.group_name,''), COALESCE(s.source_id,''), COALESCE(s.source_url,''), COALESCE(s.source_name_prefix,''), COALESCE(s.source_auto_refresh,0), COALESCE(s.source_refresh_interval_m,0), COALESCE(s.source_last_refresh_at,''), COALESCE(s.last_latency_ms,-1), COALESCE(s.last_test_ok,0), COALESCE(s.last_tested_at,''), COALESCE(s.last_ip_health_json,''), s.sort_order, s.created_at
+FROM src.browser_proxies s
+WHERE NOT EXISTS (
+  SELECT 1 FROM browser_proxies t
+  WHERE t.proxy_id = s.proxy_id OR lower(t.proxy_config) = lower(s.proxy_config)
+)`
+				}
+			}
+		}
 		res, err := tx.Exec(sqlText)
 		if err != nil {
 			return fmt.Errorf("导入数据表失败(%s): %w", item.name, err)

@@ -142,6 +142,17 @@ var migrations = []migration{
 			`ALTER TABLE browser_bookmarks ADD COLUMN open_on_start INTEGER NOT NULL DEFAULT 0`,
 		},
 	},
+	{
+		version: 8,
+		desc:    "代理表添加地理位置缓存字段",
+		stmts: []string{
+			`ALTER TABLE browser_proxies ADD COLUMN country TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE browser_proxies ADD COLUMN region TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE browser_proxies ADD COLUMN city TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE browser_proxies ADD COLUMN timezone TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE browser_proxies ADD COLUMN locale TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 	// ── 新版本在此追加，格式：
 	// {
 	//     version: 4,

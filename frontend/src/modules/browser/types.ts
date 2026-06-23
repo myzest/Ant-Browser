@@ -75,6 +75,8 @@ export interface FingerprintGenerateRequest {
   locale?: string
   timezone?: string
   deviceClass?: string
+  proxyId?: string
+  proxyConfig?: string
   preserveUnknownArgs?: boolean
   regenerateSeed?: boolean
 }
@@ -149,6 +151,11 @@ export interface BrowserProxy {
   proxyId: string
   proxyName: string
   proxyConfig: string
+  country?: string
+  region?: string
+  city?: string
+  timezone?: string
+  locale?: string
   dnsServers?: string
   groupName?: string
   sourceId?: string
@@ -175,6 +182,8 @@ export interface ProxyIPHealthResult {
   country: string
   region: string
   city: string
+  timezone: string
+  locale: string
   asOrganization: string
   rawData: Record<string, any>
   updatedAt: string

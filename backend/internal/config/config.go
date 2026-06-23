@@ -83,10 +83,24 @@ type Config struct {
 	App          AppConfig          `yaml:"app"`
 	Runtime      RuntimeConfig      `yaml:"runtime"`
 	Logging      LoggingConfig      `yaml:"logging"`
+	GeoIP        GeoIPConfig        `yaml:"geoip"`
 	Browser      BrowserConfig      `yaml:"browser"`
 	ProxyCheck   ProxyCheckConfig   `yaml:"proxy_check"`
 	LaunchServer LaunchServerConfig `yaml:"launch_server"`
 	Automation   AutomationConfig   `yaml:"automation"`
+}
+
+type GeoIPConfig struct {
+	Enabled      bool   `yaml:"enabled" json:"enabled"`
+	Provider     string `yaml:"provider,omitempty" json:"provider,omitempty"`
+	EditionID    string `yaml:"edition_id,omitempty" json:"editionId,omitempty"`
+	AccountID    string `yaml:"account_id,omitempty" json:"accountId,omitempty"`
+	LicenseKey   string `yaml:"license_key,omitempty" json:"licenseKey,omitempty"`
+	DatabasePath string `yaml:"database_path,omitempty" json:"databasePath,omitempty"`
+	CacheDir     string `yaml:"cache_dir,omitempty" json:"cacheDir,omitempty"`
+	AutoUpdate   bool   `yaml:"auto_update,omitempty" json:"autoUpdate,omitempty"`
+	MaxAgeDays   int    `yaml:"max_age_days,omitempty" json:"maxAgeDays,omitempty"`
+	TimeoutMs    int    `yaml:"timeout_ms,omitempty" json:"timeoutMs,omitempty"`
 }
 
 type ProxyCheckConfig struct {
@@ -173,6 +187,11 @@ type BrowserProxy struct {
 	ProxyId                string `yaml:"proxy_id" json:"proxyId"`
 	ProxyName              string `yaml:"proxy_name" json:"proxyName"`
 	ProxyConfig            string `yaml:"proxy_config" json:"proxyConfig"`
+	Country                string `yaml:"country,omitempty" json:"country,omitempty"`
+	Region                 string `yaml:"region,omitempty" json:"region,omitempty"`
+	City                   string `yaml:"city,omitempty" json:"city,omitempty"`
+	Timezone               string `yaml:"timezone,omitempty" json:"timezone,omitempty"`
+	Locale                 string `yaml:"locale,omitempty" json:"locale,omitempty"`
 	DnsServers             string `yaml:"dns_servers,omitempty" json:"dnsServers,omitempty"`
 	GroupName              string `yaml:"group_name,omitempty" json:"groupName,omitempty"`
 	SortOrder              int    `yaml:"sort_order,omitempty" json:"sortOrder,omitempty"`

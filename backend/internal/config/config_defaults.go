@@ -55,6 +55,39 @@ func normalizeConfig(config *Config) {
 	if config.Runtime.GCPercent <= 0 {
 		config.Runtime.GCPercent = defaultConfig.Runtime.GCPercent
 	}
+	geoIPUnset := !config.GeoIP.Enabled &&
+		strings.TrimSpace(config.GeoIP.Provider) == "" &&
+		strings.TrimSpace(config.GeoIP.EditionID) == "" &&
+		strings.TrimSpace(config.GeoIP.AccountID) == "" &&
+		strings.TrimSpace(config.GeoIP.LicenseKey) == "" &&
+		strings.TrimSpace(config.GeoIP.DatabasePath) == "" &&
+		strings.TrimSpace(config.GeoIP.CacheDir) == "" &&
+		!config.GeoIP.AutoUpdate &&
+		config.GeoIP.MaxAgeDays <= 0 &&
+		config.GeoIP.TimeoutMs <= 0
+	if geoIPUnset {
+		config.GeoIP = defaultConfig.GeoIP
+	} else {
+		config.GeoIP.Provider = normalizeGeoIPProvider(config.GeoIP.Provider)
+		if strings.TrimSpace(config.GeoIP.EditionID) == "" {
+			config.GeoIP.EditionID = defaultConfig.GeoIP.EditionID
+		}
+		config.GeoIP.AccountID = strings.TrimSpace(config.GeoIP.AccountID)
+		config.GeoIP.LicenseKey = strings.TrimSpace(config.GeoIP.LicenseKey)
+		config.GeoIP.DatabasePath = strings.TrimSpace(config.GeoIP.DatabasePath)
+		if strings.TrimSpace(config.GeoIP.CacheDir) == "" {
+			config.GeoIP.CacheDir = defaultConfig.GeoIP.CacheDir
+		}
+		if config.GeoIP.Enabled && strings.TrimSpace(config.GeoIP.DatabasePath) == "" && strings.TrimSpace(config.GeoIP.AccountID) != "" && strings.TrimSpace(config.GeoIP.LicenseKey) != "" {
+			config.GeoIP.AutoUpdate = true
+		}
+		if config.GeoIP.MaxAgeDays <= 0 {
+			config.GeoIP.MaxAgeDays = defaultConfig.GeoIP.MaxAgeDays
+		}
+		if config.GeoIP.TimeoutMs <= 0 {
+			config.GeoIP.TimeoutMs = defaultConfig.GeoIP.TimeoutMs
+		}
+	}
 
 	if strings.TrimSpace(config.Logging.Level) == "" {
 		config.Logging.Level = defaultConfig.Logging.Level
@@ -229,6 +262,15 @@ func DefaultConfig() *Config {
 			MaxMemoryMB: 0,
 			GCPercent:   100,
 		},
+		GeoIP: GeoIPConfig{
+			Enabled:    false,
+			Provider:   "maxmind",
+			EditionID:  "GeoLite2-City",
+			CacheDir:   "data/geoip",
+			AutoUpdate: true,
+			MaxAgeDays: 30,
+			TimeoutMs:  15000,
+		},
 		Browser: BrowserConfig{
 			UserDataRoot:           "data",
 			DefaultFingerprintArgs: defaultFingerprintArgsForOS(goruntime.GOOS),
@@ -304,5 +346,14 @@ func normalizeAutomationNodeSource(value string) string {
 		return AutomationNodeSourceBundled
 	default:
 		return AutomationNodeSourceAuto
+	}
+}
+
+func normalizeGeoIPProvider(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "maxmind", "geolite2":
+		return "maxmind"
+	default:
+		return strings.ToLower(strings.TrimSpace(value))
 	}
 }

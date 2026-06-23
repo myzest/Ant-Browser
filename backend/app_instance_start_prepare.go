@@ -2,6 +2,7 @@ package backend
 
 import (
 	"ant-chrome/backend/internal/browser"
+	"ant-chrome/backend/internal/fingerprint"
 	"ant-chrome/backend/internal/logger"
 	"ant-chrome/backend/internal/proxy"
 	"fmt"
@@ -39,6 +40,8 @@ type browserStartPlan struct {
 	maxStartAttempts      int
 	totalReadyTimeout     time.Duration
 }
+
+var resolveFingerprintExitIP = proxy.ResolveExitIPWithCacheKey
 
 func newBrowserStartInput(profileID string, extraLaunchArgs []string, startURLs []string, skipDefaultStartURLs bool, preferVisibleWindow bool, forceDirectProxy bool, requireDebugBridge bool, proxyID string, proxyConfig string) browserStartInput {
 	normalizedExtraLaunchArgs := normalizeNonEmptyStrings(extraLaunchArgs)
@@ -268,14 +271,7 @@ func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPo
 	}
 	autoFingerprintArgs := []string{}
 	if !hasFingerprint {
-		seed := 0
-		for _, char := range profile.ProfileId {
-			seed = (seed << 5) - seed + int(char)
-		}
-		if seed < 0 {
-			seed = -seed
-		}
-		autoFingerprintArgs = append(autoFingerprintArgs, fmt.Sprintf("--fingerprint=%d", seed))
+		autoFingerprintArgs = append(autoFingerprintArgs, fingerprint.SeedArg(profile.ProfileId))
 	}
 
 	if effectiveProxy == "direct://" {
@@ -318,7 +314,7 @@ func (a *App) resolveAutoWebRTCIPLaunchArgWithCacheKey(profileID string, args []
 		return removeLaunchArgValueAt(args, index, valueIndex)
 	}
 
-	ip, err := proxy.ResolveExitIPWithCacheKey(effectiveProxy, cacheKey, 5*time.Second)
+	ip, err := resolveFingerprintExitIP(effectiveProxy, cacheKey, 5*time.Second)
 	if err != nil || strings.TrimSpace(ip) == "" {
 		if err != nil {
 			log.Warn("WebRTC 出口 IP 自动解析失败，已移除 auto 参数",

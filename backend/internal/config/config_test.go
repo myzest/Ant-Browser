@@ -45,6 +45,9 @@ browser: {}
 	if cfg.Runtime.MaxMemoryMB != 0 || cfg.Runtime.GCPercent != 100 {
 		t.Fatalf("Runtime 未补齐: got=%+v", cfg.Runtime)
 	}
+	if cfg.GeoIP.Enabled || cfg.GeoIP.Provider != "maxmind" || cfg.GeoIP.EditionID != "GeoLite2-City" || cfg.GeoIP.CacheDir != "data/geoip" || !cfg.GeoIP.AutoUpdate || cfg.GeoIP.MaxAgeDays != 30 || cfg.GeoIP.TimeoutMs != 15000 {
+		t.Fatalf("GeoIP 默认值未补齐: got=%+v", cfg.GeoIP)
+	}
 	if cfg.Logging.Level != "info" || cfg.Logging.FilePath != "data/logs/app.log" {
 		t.Fatalf("Logging 基础字段未补齐: got=%+v", cfg.Logging)
 	}
@@ -146,7 +149,8 @@ func TestDefaultFingerprintArgsForOS(t *testing.T) {
 		if !hasArgPrefix(got, "--fingerprint-webgl-renderer=") {
 			t.Fatalf("%s: missing WebGL renderer in %v", goos, got)
 		}
-		if health := fingerprint.Health(got); health.Status != "green" {
+		withSeed := append([]string{fingerprint.SeedArg("test-" + goos)}, got...)
+		if health := fingerprint.Health(withSeed); health.Status != "green" {
 			t.Fatalf("%s: default fingerprint should be healthy, got %#v", goos, health)
 		}
 	}
@@ -232,6 +236,17 @@ app:
 runtime:
   max_memory_mb: 2048
   gc_percent: 80
+geoip:
+  enabled: true
+  provider: geolite2
+  edition_id: GeoLite2-City
+  account_id: "12345"
+  license_key: "secret"
+  database_path: custom/GeoLite2-City.mmdb
+  cache_dir: custom/geoip
+  auto_update: true
+  max_age_days: 7
+  timeout_ms: 3000
 logging:
   level: debug
   file_enabled: true
@@ -299,6 +314,9 @@ automation:
 	}
 	if cfg.Runtime.MaxMemoryMB != 2048 || cfg.Runtime.GCPercent != 80 {
 		t.Fatalf("Runtime 显式配置被覆盖: got=%+v", cfg.Runtime)
+	}
+	if !cfg.GeoIP.Enabled || cfg.GeoIP.Provider != "maxmind" || cfg.GeoIP.AccountID != "12345" || cfg.GeoIP.LicenseKey != "secret" || cfg.GeoIP.DatabasePath != "custom/GeoLite2-City.mmdb" || cfg.GeoIP.CacheDir != "custom/geoip" || cfg.GeoIP.MaxAgeDays != 7 || cfg.GeoIP.TimeoutMs != 3000 {
+		t.Fatalf("GeoIP 显式配置被覆盖: got=%+v", cfg.GeoIP)
 	}
 	if cfg.Logging.Level != "debug" || cfg.Logging.Format != "json" || !cfg.Logging.FileEnabled {
 		t.Fatalf("Logging 显式配置被覆盖: got=%+v", cfg.Logging)

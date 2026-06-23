@@ -1,0 +1,14 @@
+{
+  "windows": {
+    "markerFonts": ["Segoe UI", "Calibri", "Cambria Math", "Consolas"],
+    "optionalFonts": ["Arial", "Tahoma", "Times New Roman", "Verdana", "Microsoft YaHei", "SimSun", "SimHei"]
+  },
+  "mac": {
+    "markerFonts": ["Helvetica Neue", "PingFang SC", "Menlo", "Monaco"],
+    "optionalFonts": ["Arial", "Helvetica", "Apple Color Emoji", "Times New Roman", "Hiragino Sans GB"]
+  },
+  "linux": {
+    "markerFonts": ["Noto Sans", "Noto Color Emoji", "Arimo", "Cousine"],
+    "optionalFonts": ["Tinos", "Noto Sans CJK SC", "Liberation Sans", "DejaVu Sans"]
+  }
+}

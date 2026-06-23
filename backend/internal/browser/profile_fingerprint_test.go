@@ -2,6 +2,8 @@ package browser
 
 import (
 	"ant-chrome/backend/internal/config"
+	"ant-chrome/backend/internal/fingerprint"
+	"strings"
 	"testing"
 )
 
@@ -38,8 +40,8 @@ func TestDefaultFingerprintArgsForProfilePreservesConfiguredSemantics(t *testing
 			t.Fatalf("generated args missing %q: %v", want, args)
 		}
 	}
-	if browserTestHasPrefix(args, "--fingerprint=") {
-		t.Fatalf("default profile args should not carry old seed, got %v", args)
+	if !browserTestContains(args, "--fingerprint="+fingerprintStableSeedForTest("profile-default")) {
+		t.Fatalf("default profile args should carry profile seed, got %v", args)
 	}
 }
 
@@ -70,9 +72,33 @@ func TestDefaultFingerprintArgsForProfileUsesSourceArgsWhenCopying(t *testing.T)
 			t.Fatalf("copy args missing %q: %v", want, args)
 		}
 	}
-	if browserTestHasPrefix(args, "--fingerprint=") {
+	if browserTestContains(args, "--fingerprint=source-seed") {
 		t.Fatalf("copy args should not carry source seed, got %v", args)
 	}
+	if !browserTestContains(args, "--fingerprint="+fingerprintStableSeedForTest("profile-copy")) {
+		t.Fatalf("copy args should carry copied profile seed, got %v", args)
+	}
+}
+
+func TestDefaultFingerprintArgsForProfileReplacesInvalidInputSeed(t *testing.T) {
+	t.Parallel()
+
+	mgr := NewManager(config.DefaultConfig(), t.TempDir())
+	args := mgr.defaultFingerprintArgsForProfile("profile-invalid-input-seed", []string{
+		"--fingerprint=0",
+		"--fingerprint-platform=windows",
+	}, nil, "")
+
+	if browserTestContains(args, "--fingerprint=0") {
+		t.Fatalf("invalid input seed should be replaced, got %v", args)
+	}
+	if !browserTestContains(args, "--fingerprint="+fingerprintStableSeedForTest("profile-invalid-input-seed")) {
+		t.Fatalf("profile seed missing after invalid input replacement, got %v", args)
+	}
+}
+
+func fingerprintStableSeedForTest(profileID string) string {
+	return strings.TrimPrefix(fingerprint.SeedArg(profileID), "--fingerprint=")
 }
 
 func browserTestContains(items []string, want string) bool {

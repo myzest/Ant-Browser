@@ -1,0 +1,268 @@
+[
+  {
+    "ID": "win_chrome_office_intel_1920",
+    "Weight": 120,
+    "Platform": "windows",
+    "Brand": "Chrome",
+    "Locale": "zh-CN",
+    "Timezone": "Asia/Shanghai",
+    "Screen": {
+      "Width": 1920,
+      "Height": 1080,
+      "AvailWidth": 1920,
+      "AvailHeight": 1040,
+      "ColorDepth": 24,
+      "DevicePixelRatio": 1
+    },
+    "Hardware": {
+      "HardwareConcurrency": 8,
+      "DeviceMemory": 8,
+      "TouchPoints": 0
+    },
+    "WebGL": {
+      "Vendor": "Intel",
+      "Renderer": "Intel(R) UHD Graphics 630"
+    },
+    "Fonts": ["Arial", "Calibri", "Cambria Math", "Consolas", "Segoe UI", "Tahoma", "Times New Roman", "Verdana", "Microsoft YaHei"],
+    "Media": {
+      "Cameras": 1,
+      "Microphones": 1,
+      "Speakers": 1
+    },
+    "Privacy": {
+      "WebRTCPolicy": "disable_non_proxied_udp",
+      "WebRTCIP": "auto",
+      "CanvasNoise": true,
+      "AudioNoise": true
+    },
+    "DeviceClass": "office"
+  },
+  {
+    "ID": "win_chrome_laptop_intel_1366",
+    "Weight": 90,
+    "Platform": "windows",
+    "Brand": "Chrome",
+    "Locale": "zh-CN",
+    "Timezone": "Asia/Shanghai",
+    "Screen": {
+      "Width": 1366,
+      "Height": 768,
+      "AvailWidth": 1366,
+      "AvailHeight": 728,
+      "ColorDepth": 24,
+      "DevicePixelRatio": 1
+    },
+    "Hardware": {
+      "HardwareConcurrency": 4,
+      "DeviceMemory": 4,
+      "TouchPoints": 0
+    },
+    "WebGL": {
+      "Vendor": "Intel",
+      "Renderer": "Intel(R) UHD Graphics 620"
+    },
+    "Fonts": ["Arial", "Calibri", "Consolas", "Segoe UI", "Tahoma", "Times New Roman", "Verdana"],
+    "Media": {
+      "Cameras": 1,
+      "Microphones": 1,
+      "Speakers": 1
+    },
+    "Privacy": {
+      "WebRTCPolicy": "disable_non_proxied_udp",
+      "WebRTCIP": "auto",
+      "CanvasNoise": true,
+      "AudioNoise": true
+    },
+    "DeviceClass": "laptop"
+  },
+  {
+    "ID": "win_chrome_gaming_nvidia_2560",
+    "Weight": 40,
+    "Platform": "windows",
+    "Brand": "Chrome",
+    "Locale": "zh-CN",
+    "Timezone": "Asia/Shanghai",
+    "Screen": {
+      "Width": 2560,
+      "Height": 1440,
+      "AvailWidth": 2560,
+      "AvailHeight": 1400,
+      "ColorDepth": 24,
+      "DevicePixelRatio": 1
+    },
+    "Hardware": {
+      "HardwareConcurrency": 16,
+      "DeviceMemory": 16,
+      "TouchPoints": 0
+    },
+    "WebGL": {
+      "Vendor": "NVIDIA",
+      "Renderer": "NVIDIA GeForce RTX 3060"
+    },
+    "Fonts": ["Arial", "Calibri", "Cambria Math", "Consolas", "Segoe UI", "Tahoma", "Times New Roman", "Verdana"],
+    "Media": {
+      "Cameras": 1,
+      "Microphones": 2,
+      "Speakers": 2
+    },
+    "Privacy": {
+      "WebRTCPolicy": "disable_non_proxied_udp",
+      "WebRTCIP": "auto",
+      "CanvasNoise": true,
+      "AudioNoise": true
+    },
+    "DeviceClass": "gaming"
+  },
+  {
+    "ID": "mac_chrome_laptop_apple_1440",
+    "Weight": 110,
+    "Platform": "mac",
+    "Brand": "Chrome",
+    "Locale": "zh-CN",
+    "Timezone": "Asia/Shanghai",
+    "Screen": {
+      "Width": 1440,
+      "Height": 900,
+      "AvailWidth": 1440,
+      "AvailHeight": 826,
+      "ColorDepth": 24,
+      "DevicePixelRatio": 2
+    },
+    "Hardware": {
+      "HardwareConcurrency": 8,
+      "DeviceMemory": 8,
+      "TouchPoints": 0
+    },
+    "WebGL": {
+      "Vendor": "Apple",
+      "Renderer": "Apple M1"
+    },
+    "Fonts": ["Arial", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "PingFang SC", "Apple Color Emoji", "Times New Roman"],
+    "Media": {
+      "Cameras": 1,
+      "Microphones": 1,
+      "Speakers": 1
+    },
+    "Privacy": {
+      "WebRTCPolicy": "disable_non_proxied_udp",
+      "WebRTCIP": "auto",
+      "CanvasNoise": true,
+      "AudioNoise": true
+    },
+    "DeviceClass": "laptop"
+  },
+  {
+    "ID": "mac_chrome_workstation_apple_2560",
+    "Weight": 55,
+    "Platform": "mac",
+    "Brand": "Chrome",
+    "Locale": "zh-CN",
+    "Timezone": "Asia/Shanghai",
+    "Screen": {
+      "Width": 2560,
+      "Height": 1440,
+      "AvailWidth": 2560,
+      "AvailHeight": 1366,
+      "ColorDepth": 24,
+      "DevicePixelRatio": 2
+    },
+    "Hardware": {
+      "HardwareConcurrency": 10,
+      "DeviceMemory": 16,
+      "TouchPoints": 0
+    },
+    "WebGL": {
+      "Vendor": "Apple",
+      "Renderer": "Apple M2"
+    },
+    "Fonts": ["Arial", "Helvetica", "Helvetica Neue", "Menlo", "Monaco", "PingFang SC", "Apple Color Emoji", "Times New Roman"],
+    "Media": {
+      "Cameras": 1,
+      "Microphones": 2,
+      "Speakers": 2
+    },
+    "Privacy": {
+      "WebRTCPolicy": "disable_non_proxied_udp",
+      "WebRTCIP": "auto",
+      "CanvasNoise": true,
+      "AudioNoise": true
+    },
+    "DeviceClass": "workstation"
+  },
+  {
+    "ID": "linux_chrome_office_mesa_1920",
+    "Weight": 80,
+    "Platform": "linux",
+    "Brand": "Chrome",
+    "Locale": "zh-CN",
+    "Timezone": "Asia/Shanghai",
+    "Screen": {
+      "Width": 1920,
+      "Height": 1080,
+      "AvailWidth": 1920,
+      "AvailHeight": 1000,
+      "ColorDepth": 24,
+      "DevicePixelRatio": 1
+    },
+    "Hardware": {
+      "HardwareConcurrency": 8,
+      "DeviceMemory": 8,
+      "TouchPoints": 0
+    },
+    "WebGL": {
+      "Vendor": "Intel",
+      "Renderer": "Mesa Intel(R) UHD Graphics 620"
+    },
+    "Fonts": ["Arimo", "Cousine", "Tinos", "Noto Sans", "Noto Sans CJK SC", "Noto Color Emoji"],
+    "Media": {
+      "Cameras": 0,
+      "Microphones": 1,
+      "Speakers": 1
+    },
+    "Privacy": {
+      "WebRTCPolicy": "disable_non_proxied_udp",
+      "WebRTCIP": "auto",
+      "CanvasNoise": true,
+      "AudioNoise": true
+    },
+    "DeviceClass": "office"
+  },
+  {
+    "ID": "linux_chrome_light_mesa_1366",
+    "Weight": 55,
+    "Platform": "linux",
+    "Brand": "Chrome",
+    "Locale": "zh-CN",
+    "Timezone": "Asia/Shanghai",
+    "Screen": {
+      "Width": 1366,
+      "Height": 768,
+      "AvailWidth": 1366,
+      "AvailHeight": 688,
+      "ColorDepth": 24,
+      "DevicePixelRatio": 1
+    },
+    "Hardware": {
+      "HardwareConcurrency": 4,
+      "DeviceMemory": 4,
+      "TouchPoints": 0
+    },
+    "WebGL": {
+      "Vendor": "Intel",
+      "Renderer": "Mesa Intel(R) HD Graphics 520"
+    },
+    "Fonts": ["Arimo", "Cousine", "Tinos", "Noto Sans", "Noto Color Emoji"],
+    "Media": {
+      "Cameras": 0,
+      "Microphones": 1,
+      "Speakers": 1
+    },
+    "Privacy": {
+      "WebRTCPolicy": "disable_non_proxied_udp",
+      "WebRTCIP": "auto",
+      "CanvasNoise": true,
+      "AudioNoise": true
+    },
+    "DeviceClass": "light_linux"
+  }
+]

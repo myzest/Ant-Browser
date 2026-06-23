@@ -6,6 +6,13 @@ import (
 	"strings"
 )
 
+type ValidationContext struct {
+	ProxyCountry  string
+	ProxyLocale   string
+	ProxyTimezone string
+	ProxyIP       string
+}
+
 func Validate(profile *Profile) []ValidationIssue {
 	if profile == nil {
 		return []ValidationIssue{{Code: "empty_profile", Severity: "red", Field: "profile", Message: "指纹 profile 为空"}}
@@ -14,8 +21,17 @@ func Validate(profile *Profile) []ValidationIssue {
 }
 
 func ValidateArgs(args []string) []ValidationIssue {
+	return ValidateArgsWithContext(args, ValidationContext{})
+}
+
+func ValidateArgsWithContext(args []string, ctx ValidationContext) []ValidationIssue {
 	values := ParseArgs(args)
 	issues := make([]ValidationIssue, 0)
+	if seed := strings.TrimSpace(values["--fingerprint"]); seed == "" {
+		issues = append(issues, issue("missing_seed", "yellow", "--fingerprint", "缺少稳定指纹 seed"))
+	} else if parsed, err := strconv.ParseInt(seed, 10, 64); err != nil || parsed <= 0 {
+		issues = append(issues, issue("invalid_seed", "red", "--fingerprint", "指纹 seed 应为正整数"))
+	}
 	rawPlatform := strings.TrimSpace(values["--fingerprint-platform"])
 	platform := NormalizePlatform(rawPlatform)
 	if rawPlatform == "" {
@@ -27,11 +43,17 @@ func ValidateArgs(args []string) []ValidationIssue {
 	} else if strings.EqualFold(brand, "Firefox") || strings.EqualFold(brand, "Safari") {
 		issues = append(issues, issue("non_chromium_brand", "red", "--fingerprint-brand", "Chromium 指纹不应使用 Firefox/Safari 品牌"))
 	}
+	issues = append(issues, validateUserAgent(args)...)
 	if values["--lang"] != "" && values["--fingerprint-locale"] != "" && !strings.EqualFold(values["--lang"], values["--fingerprint-locale"]) {
 		issues = append(issues, issue("locale_mismatch", "yellow", "--fingerprint-locale", "lang 与 fingerprint locale 不一致"))
 	}
 	if values["--timezone"] != "" && values["--fingerprint-timezone"] != "" && !strings.EqualFold(values["--timezone"], values["--fingerprint-timezone"]) {
 		issues = append(issues, issue("timezone_mismatch", "yellow", "--fingerprint-timezone", "timezone 与 fingerprint timezone 不一致"))
+	}
+	if locale := firstNonEmpty(values["--fingerprint-locale"], values["--lang"]); locale != "" {
+		if timezone := firstNonEmpty(values["--fingerprint-timezone"], values["--timezone"]); timezone != "" && localeTimezoneCountry(locale) != "" && timezoneCountry(timezone) != "" && localeTimezoneCountry(locale) != timezoneCountry(timezone) {
+			issues = append(issues, issue("locale_timezone_region_mismatch", "yellow", "--fingerprint-timezone", "语言与时区地区不一致"))
+		}
 	}
 	if value := values["--window-size"]; value != "" {
 		width, height, ok := parseStrictPair(value)
@@ -40,6 +62,27 @@ func ValidateArgs(args []string) []ValidationIssue {
 		}
 		if width < 800 || height < 600 {
 			issues = append(issues, issue("window_too_small", "yellow", "--window-size", "窗口尺寸过小，容易形成异常 profile"))
+		}
+		if avail := values["--fingerprint-screen-avail"]; avail != "" {
+			availWidth, availHeight, ok := parseStrictPair(avail)
+			if !ok {
+				issues = append(issues, issue("invalid_screen_avail", "red", "--fingerprint-screen-avail", "可用屏幕尺寸格式无效，应为 宽,高"))
+			} else {
+				if availWidth > width || availHeight > height {
+					issues = append(issues, issue("screen_avail_exceeds_size", "red", "--fingerprint-screen-avail", "可用屏幕尺寸不应大于屏幕尺寸"))
+				}
+				if width-availWidth > 120 || height-availHeight > 180 {
+					issues = append(issues, issue("screen_avail_gap_unusual", "yellow", "--fingerprint-screen-avail", "屏幕与可用区域差值不常见"))
+				}
+			}
+		}
+	}
+	if value := values["--fingerprint-device-pixel-ratio"]; value != "" {
+		dpr, err := strconv.ParseFloat(value, 64)
+		if err != nil || dpr <= 0 {
+			issues = append(issues, issue("invalid_device_pixel_ratio", "red", "--fingerprint-device-pixel-ratio", "devicePixelRatio 不是合法正数"))
+		} else if dpr > 4 {
+			issues = append(issues, issue("unusual_device_pixel_ratio", "yellow", "--fingerprint-device-pixel-ratio", "devicePixelRatio 过高，容易形成异常 profile"))
 		}
 	}
 	if value := values["--fingerprint-color-depth"]; value != "" {
@@ -97,10 +140,61 @@ func ValidateArgs(args []string) []ValidationIssue {
 	if ip := values["--fingerprint-webrtc-ip"]; ip != "" && !strings.EqualFold(ip, "auto") {
 		if _, err := netip.ParseAddr(ip); err != nil {
 			issues = append(issues, issue("invalid_webrtc_ip", "red", "--fingerprint-webrtc-ip", "WebRTC IP 不是合法 IP 地址"))
+		} else if ctx.ProxyIP != "" && ip != strings.TrimSpace(ctx.ProxyIP) {
+			issues = append(issues, issue("proxy_webrtc_ip_mismatch", "yellow", "--fingerprint-webrtc-ip", "WebRTC IP 与代理出口 IP 不一致"))
 		}
 	}
+	issues = append(issues, validateProxyRegion(values, ctx)...)
 	issues = append(issues, validateRiskyLaunchArgs(args)...)
 	return issues
+}
+
+func validateUserAgent(args []string) []ValidationIssue {
+	for i := 0; i < len(args); i++ {
+		key, value, consumed := splitLaunchArg(args, i)
+		if consumed {
+			i++
+		}
+		if key != "--user-agent" && key != "--user-agent-string" {
+			continue
+		}
+		lower := strings.ToLower(value)
+		if strings.Contains(lower, "firefox/") || strings.Contains(lower, "camoufox/") || (strings.Contains(lower, "gecko/") && strings.Contains(lower, " rv:")) {
+			return []ValidationIssue{issue("non_chromium_user_agent", "red", key, "Chromium profile 不应使用 Firefox/Camoufox User-Agent")}
+		}
+	}
+	return nil
+}
+
+func validateProxyRegion(values map[string]string, ctx ValidationContext) []ValidationIssue {
+	country := strings.ToUpper(strings.TrimSpace(ctx.ProxyCountry))
+	if country == "" {
+		return nil
+	}
+	lib := LoadLibrary()
+	expectedLocale, expectedTimezone, normalizedCountry := lib.localeTimezone(country, ctx.ProxyLocale, ctx.ProxyTimezone)
+	if normalizedCountry == "" {
+		normalizedCountry = country
+	}
+	locale := firstNonEmpty(values["--fingerprint-locale"], values["--lang"])
+	timezone := firstNonEmpty(values["--fingerprint-timezone"], values["--timezone"])
+	issues := make([]ValidationIssue, 0, 2)
+	if expectedLocale != "" && locale != "" && !strings.EqualFold(locale, expectedLocale) {
+		issues = append(issues, issue("proxy_locale_mismatch", "yellow", "--fingerprint-locale", "语言与代理地区 "+normalizedCountry+" 不一致"))
+	}
+	if expectedTimezone != "" && timezone != "" && !strings.EqualFold(timezone, expectedTimezone) {
+		issues = append(issues, issue("proxy_timezone_mismatch", "yellow", "--fingerprint-timezone", "时区与代理地区 "+normalizedCountry+" 不一致"))
+	}
+	return issues
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return ""
 }
 
 func validateRiskyLaunchArgs(args []string) []ValidationIssue {
@@ -211,7 +305,11 @@ func validMediaDevices(value string) bool {
 }
 
 func Health(args []string) HealthReport {
-	issues := ValidateArgs(args)
+	return HealthWithContext(args, ValidationContext{})
+}
+
+func HealthWithContext(args []string, ctx ValidationContext) HealthReport {
+	issues := ValidateArgsWithContext(args, ctx)
 	status := "green"
 	for _, item := range issues {
 		if item.Severity == "red" {
@@ -245,17 +343,69 @@ func validateFonts(platform string, fonts string) []ValidationIssue {
 }
 
 func webGLAllowed(platform string, vendor string, renderer string) bool {
-	v := strings.ToLower(vendor)
-	r := strings.ToLower(renderer)
-	switch platform {
-	case PlatformMac:
-		return strings.Contains(v, "apple") || strings.Contains(r, "apple")
-	case PlatformLinux:
-		return strings.Contains(r, "mesa") || strings.Contains(v, "intel") || strings.Contains(v, "amd")
-	case PlatformWindows:
-		return strings.Contains(v, "intel") || strings.Contains(v, "nvidia") || strings.Contains(v, "amd")
+	platform = NormalizePlatform(platform)
+	vendor = strings.TrimSpace(vendor)
+	renderer = strings.TrimSpace(renderer)
+	for _, candidate := range LoadLibrary().webgl[platform] {
+		if strings.EqualFold(candidate.Vendor, vendor) && strings.EqualFold(candidate.Renderer, renderer) {
+			return true
+		}
+	}
+	return false
+}
+
+func localeTimezoneCountry(locale string) string {
+	lower := strings.ToLower(strings.TrimSpace(locale))
+	switch {
+	case strings.HasPrefix(lower, "zh-cn"):
+		return "CN"
+	case strings.HasPrefix(lower, "en-us"):
+		return "US"
+	case strings.HasPrefix(lower, "en-gb"):
+		return "GB"
+	case strings.HasPrefix(lower, "de-de"):
+		return "DE"
+	case strings.HasPrefix(lower, "fr-fr"):
+		return "FR"
+	case strings.HasPrefix(lower, "ja-jp"):
+		return "JP"
+	case strings.HasPrefix(lower, "ko-kr"):
+		return "KR"
+	case strings.HasPrefix(lower, "en-sg"):
+		return "SG"
+	case strings.HasPrefix(lower, "pt-br"):
+		return "BR"
+	case strings.HasPrefix(lower, "en-in"):
+		return "IN"
 	default:
-		return false
+		return ""
+	}
+}
+
+func timezoneCountry(timezone string) string {
+	switch strings.ToLower(strings.TrimSpace(timezone)) {
+	case "asia/shanghai":
+		return "CN"
+	case "america/new_york", "america/los_angeles", "america/chicago":
+		return "US"
+	case "europe/london":
+		return "GB"
+	case "europe/berlin":
+		return "DE"
+	case "europe/paris":
+		return "FR"
+	case "asia/tokyo":
+		return "JP"
+	case "asia/seoul":
+		return "KR"
+	case "asia/singapore":
+		return "SG"
+	case "america/sao_paulo":
+		return "BR"
+	case "asia/kolkata":
+		return "IN"
+	default:
+		return ""
 	}
 }
 

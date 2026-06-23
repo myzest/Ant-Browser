@@ -72,6 +72,8 @@ config.yaml.broken-*
 *.db
 *.sqlite
 *.sqlite3
+*.mmdb
+*.mmdb.tmp
 proxies.yaml
 profiles.yaml
 
