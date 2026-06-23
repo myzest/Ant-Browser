@@ -2,19 +2,9 @@
 
 > 面向多账号隔离、代理绑定和本地环境管理的桌面浏览器工具（Windows / Linux / macOS unsigned）。
 
-[![Release](https://img.shields.io/github/v/release/black-ant/Ant-Browser?sort=semver)](https://github.com/black-ant/Ant-Browser/releases)
-[![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20Linux%20%7C%20macOS-blue)](https://github.com/black-ant/Ant-Browser/releases)
-[![Issues](https://img.shields.io/github/issues/black-ant/Ant-Browser)](https://github.com/black-ant/Ant-Browser/issues)
+## 推荐内核
 
-## 推荐内核项目
-
-Ant Browser 当前推荐配套使用的浏览器内核，来源于开源项目 [fingerprint-chromium](https://github.com/adryfish/fingerprint-chromium)。
-
-如果你正在寻找可直接下载和维护的指纹内核版本，建议先查看它的 Releases 页面：
-
-- <https://github.com/adryfish/fingerprint-chromium/releases>
-
-这个项目为 Ant Browser 的内核准备提供了直接可用的基础来源，这里先对原项目做明确推荐与致谢。
+Ant Browser 可配套使用团队维护或自行准备的浏览器内核 ZIP 包。下载后可在应用内通过“内核管理”完成导入、识别和默认内核设置。
 
 Ant Browser 的目标很明确：在一台桌面设备上，帮助用户稳定管理多个彼此隔离的浏览器实例，并配合代理池、浏览器内核和快捷启动能力完成日常运营或测试工作。
 
@@ -142,7 +132,7 @@ Ant Browser 适合以下场景：
 
 ### 下载与运行
 
-1. 前往 Releases 页面下载最新版本：<https://github.com/black-ant/Ant-Browser/releases>
+1. 从项目发布渠道获取最新版本安装包
 2. 安装版直接运行 `AntBrowser-Setup-*.exe`
 3. 便携版解压后运行 `ant-chrome.exe`
 4. Linux 包下载后可直接安装 `ant-browser_<version>_<arch>.deb`，或解压 `tar.gz` 后运行 `ant-chrome`
@@ -249,18 +239,17 @@ chrome/
 
 ## 贡献
 
-欢迎通过 Issue 和 Pull Request 参与改进。
+欢迎通过项目维护流程参与改进。
 
 - Bug 反馈：请附带版本号、系统版本、复现步骤和截图
 - 功能建议：请说明业务场景、预期行为和现有问题
 - 文档优化：欢迎直接提交 README、教程和截图说明相关改进
 
-如果是较大改动，建议先开 Issue 对齐需求再提交 PR。
+如果是较大改动，建议先和维护者对齐需求再提交修改。
 
 ## 支持与反馈
 
-- Releases：<https://github.com/black-ant/Ant-Browser/releases>
-- Issues：<https://github.com/black-ant/Ant-Browser/issues>
+请通过项目维护者指定的发布渠道和反馈渠道获取版本更新、提交问题或提出功能建议。
 
 ## License
 

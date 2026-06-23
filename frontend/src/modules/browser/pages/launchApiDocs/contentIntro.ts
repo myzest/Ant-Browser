@@ -195,8 +195,7 @@ chrome/
 
 ## 下载渠道
 
-- [fingerprint-chromium](https://github.com/adryfish/fingerprint-chromium)
-- [Releases](https://github.com/adryfish/fingerprint-chromium/releases)
+使用可直接下载的浏览器内核 ZIP 包地址，或从团队内部维护的发布渠道获取安装包。
 
 ## 在应用里怎么用
 

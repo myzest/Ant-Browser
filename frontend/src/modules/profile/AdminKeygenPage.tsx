@@ -60,7 +60,7 @@ export function AdminKeygenPage() {
         <>
             <Modal
                 open={!accessGranted}
-                onClose={() => navigate('/profile')}
+                onClose={() => navigate('/')}
                 title="管理员验证"
                 width="420px"
                 closable={false}
@@ -80,7 +80,7 @@ export function AdminKeygenPage() {
                         spellCheck={false}
                     />
                     <div className="flex justify-end gap-3 pt-1">
-                        <Button type="button" variant="secondary" onClick={() => navigate('/profile')}>
+                        <Button type="button" variant="secondary" onClick={() => navigate('/')}>
                             取消
                         </Button>
                         <Button type="submit">

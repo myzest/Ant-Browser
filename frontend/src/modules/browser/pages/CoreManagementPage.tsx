@@ -4,7 +4,7 @@ import { Badge, Button, Card, ConfirmModal, FormItem, Input, Modal, Switch, Tabl
 import type { TableColumn } from '../../../shared/components/Table'
 import type { BrowserCore, BrowserCoreInput, BrowserCoreValidateResult, BrowserSettings, BrowserCoreExtended, BrowserProxy } from '../types'
 import { fetchBrowserCores, saveBrowserCore, deleteBrowserCore, setDefaultBrowserCore, validateBrowserCorePath, openCorePath, fetchBrowserSettings, saveBrowserSettings, fetchCoreExtendedInfo, scanBrowserCores, BrowserCoreDownload, fetchBrowserProxies } from '../api'
-import { EventsOn, EventsOff, BrowserOpenURL } from '../../../wailsjs/runtime/runtime'
+import { EventsOn, EventsOff } from '../../../wailsjs/runtime/runtime'
 
 interface CoreDisplayInfo {
   coreId: string
@@ -639,19 +639,10 @@ export function CoreManagementPage() {
             <Input
               value={downloadForm.url}
               onChange={e => setDownloadForm(prev => ({ ...prev, url: e.target.value }))}
-              placeholder="https://github.com/.../release.zip"
+              placeholder="https://example.com/chrome-release.zip"
               disabled={downloadProgress !== null}
             />
-            <div className="text-xs text-[var(--color-text-muted)] mt-2 flex items-center justify-between bg-[var(--color-bg-muted)] p-2 rounded">
-              <span>推荐指纹内核: fingerprint-chromium</span>
-              <button
-                type="button"
-                onClick={() => BrowserOpenURL('https://github.com/adryfish/fingerprint-chromium/releases')}
-                className="text-[var(--color-accent)] hover:underline cursor-pointer font-medium"
-              >
-                前往 Releases 页面获取链接
-              </button>
-            </div>
+            <p className="text-xs text-[var(--color-text-muted)] mt-1">请填写可直接下载的浏览器内核 ZIP 地址。</p>
           </FormItem>
 
           <FormItem label="下载代理设置">

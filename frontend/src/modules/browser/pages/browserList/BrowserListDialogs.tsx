@@ -1,5 +1,5 @@
 import { Link } from 'react-router-dom'
-import { ExternalLink, XCircle } from 'lucide-react'
+import { XCircle } from 'lucide-react'
 import { Button, FormItem, Input, Modal } from '../../../../shared/components'
 import { KeywordsModal } from '../../components/KeywordsModal'
 import type { BrowserProfile } from '../../types'
@@ -22,7 +22,6 @@ interface BrowserListDialogsProps {
   onCdKeyChange: (value: string) => void
   onRedeem: () => void
   redeeming: boolean
-  onOpenGithubStarGift: () => void
   copyModal: { open: boolean; profile: BrowserProfile | null }
   copyName: string
   onCopyNameChange: (value: string) => void
@@ -51,7 +50,6 @@ export function BrowserListDialogs({
   onCdKeyChange,
   onRedeem,
   redeeming,
-  onOpenGithubStarGift,
   copyModal,
   copyName,
   onCopyNameChange,
@@ -138,22 +136,6 @@ export function BrowserListDialogs({
               <Button onClick={onRedeem} loading={redeeming} disabled={!cdKey.trim()}>
                 进行兑换
               </Button>
-            </div>
-          </div>
-
-          <div className="mt-4 p-3 bg-blue-500/10 border border-blue-500/20 rounded-lg">
-            <div className="flex items-center justify-between gap-4">
-              <p className="text-sm text-[var(--color-text-primary)]">点亮 GitHub Star 后，可再获赠 50 个永久额度</p>
-              <button
-                type="button"
-                className="shrink-0 rounded-full p-2 text-[var(--color-accent)] transition-colors hover:bg-[var(--color-accent)]/10 disabled:opacity-50"
-                onClick={onOpenGithubStarGift}
-                disabled={redeeming}
-                title="打开 GitHub 并领取赠送"
-                aria-label="打开 GitHub 并领取赠送"
-              >
-                <ExternalLink className="w-4 h-4" />
-              </button>
             </div>
           </div>
         </div>

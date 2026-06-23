@@ -1074,7 +1074,7 @@ export function AutomationPage() {
                 <Input
                   value={gitURL}
                   onChange={(event) => setGitURL(event.target.value)}
-                  placeholder="https://github.com/example/automation-scripts.git"
+                  placeholder="https://example.com/automation-scripts.git"
                 />
               </FormItem>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">

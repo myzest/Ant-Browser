@@ -6,15 +6,5 @@ export {
   featuresConfig,
   uiConfig,
 } from './project.config'
-export { profilePageConfig } from './profile.config'
 
 export type { NavItem, NavSection } from './project.config'
-export type {
-  AuthorProfileConfig,
-  ProfileChannelConfig,
-  ProfileIconKey,
-  ProjectProfileActionConfig,
-  ProjectProfileConfig,
-  RemoteAuthorSourceConfig,
-  ProfilePageLocalConfig,
-} from './profile.config'

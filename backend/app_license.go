@@ -103,36 +103,6 @@ func generateChecksum(payload string) string {
 	return strings.ToUpper(hex.EncodeToString(hash[:])[0:8]) // 取前8位作为校验
 }
 
-// RedeemGithubStar 给予用户一个 github star 的一次性奖励
-func (a *App) RedeemGithubStar() error {
-	if a.config == nil {
-		a.config = DefaultConfig()
-	}
-	cdkey := appconfig.GithubStarRewardKey
-	// 防重复领取
-	for _, usedKey := range a.config.App.UsedCDKeys {
-		if usedKey == cdkey {
-			return fmt.Errorf("您已经领取过 GitHub Star 的赠送额度啦！")
-		}
-	}
-
-	a.config.App.UsedCDKeys = append(a.config.App.UsedCDKeys, cdkey)
-	a.config.App.MaxProfileLimit += appconfig.GithubStarProfileBonus
-	if minLimit := appconfig.MinimumProfileLimitForUsedKeys(a.config.App.UsedCDKeys); a.config.App.MaxProfileLimit < minLimit {
-		a.config.App.MaxProfileLimit = minLimit
-	}
-
-	configPath := a.resolveAppPath("config.yaml")
-	if _, _, err := reconcileConfigWithLocalLicense(configPath, a.config); err != nil {
-		return fmt.Errorf("保存本机额度状态失败: %v", err)
-	}
-	if err := a.config.Save(configPath); err != nil {
-		return fmt.Errorf("保存配置失败: %v", err)
-	}
-
-	return nil
-}
-
 // GenerateCDKeys 供内部隐藏管理员页面使用的发卡器接口
 func (a *App) GenerateCDKeys(count int) ([]string, error) {
 	if count <= 0 || count > 1000 {

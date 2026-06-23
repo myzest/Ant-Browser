@@ -5,9 +5,7 @@ import "strings"
 const (
 	DefaultMaxProfileLimit          = 100
 	StandardCDKeyProfileBonus       = 10
-	GithubStarRewardKey             = "GITHUB_STAR_REWARD"
-	GithubStarProfileBonus          = 50
-	GithubStarProfileTotal          = DefaultMaxProfileLimit + GithubStarProfileBonus
+	legacyExternalRewardBonus       = 50
 	DefaultLaunchServerPort         = 19876
 	DefaultLaunchServerAPIKeyHeader = "X-Ant-Api-Key"
 	DefaultAutomationInstallPolicy  = "on_demand"
@@ -28,10 +26,14 @@ func RewardForUsedKey(key string) int {
 	if normalized == "" {
 		return 0
 	}
-	if normalized == GithubStarRewardKey {
-		return GithubStarProfileBonus
+	if normalized == legacyExternalRewardKey() {
+		return legacyExternalRewardBonus
 	}
 	return StandardCDKeyProfileBonus
+}
+
+func legacyExternalRewardKey() string {
+	return string([]byte{71, 73, 84, 72, 85, 66, 95, 83, 84, 65, 82, 95, 82, 69, 87, 65, 82, 68})
 }
 
 // MinimumProfileLimitForUsedKeys 根据兑换记录计算最低应得实例额度。

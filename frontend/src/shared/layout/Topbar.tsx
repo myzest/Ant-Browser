@@ -1,5 +1,5 @@
 ﻿import { useState, useRef, useEffect } from 'react'
-import { Bell, Search, User, Settings, Check, Trash2, Info, AlertCircle, CheckCircle } from 'lucide-react'
+import { Bell, Search, Settings, Check, Trash2, Info, AlertCircle, CheckCircle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import clsx from 'clsx'
 import { useNotificationStore, type Notification } from '../../store/notificationStore'
@@ -194,17 +194,6 @@ export function Topbar() {
           <Settings className="w-4 h-4" />
         </Link>
 
-        <div className="w-px h-5 bg-[var(--color-border-default)] mx-1.5" />
-
-        <Link
-          to="/profile"
-          className="flex items-center gap-2 pl-1 pr-2.5 py-1 rounded-md hover:bg-[var(--color-accent-muted)] transition-colors duration-150"
-        >
-          <div className="w-7 h-7 bg-[var(--color-accent)] rounded-md flex items-center justify-center">
-            <User className="w-3.5 h-3.5 text-[var(--color-text-inverse)]" />
-          </div>
-          <span className="text-sm font-medium text-[var(--color-text-secondary)]">Admin</span>
-        </Link>
       </div>
     </header>
   )

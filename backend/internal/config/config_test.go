@@ -17,7 +17,7 @@ func TestLoadBackfillsLegacyConfig(t *testing.T) {
 	legacyConfig := `
 app:
   used_cd_keys:
-    - GITHUB_STAR_REWARD
+    - ANT-AAAA-BBBB-CCCC-DDDD-EEEEEEEE
 logging: {}
 browser: {}
 `
@@ -39,8 +39,9 @@ browser: {}
 	if cfg.App.Name != "Ant Browser" {
 		t.Fatalf("App.Name 未补齐: got=%q", cfg.App.Name)
 	}
-	if cfg.App.MaxProfileLimit != GithubStarProfileTotal {
-		t.Fatalf("MaxProfileLimit 计算错误: got=%d want=%d", cfg.App.MaxProfileLimit, GithubStarProfileTotal)
+	expectedLimit := DefaultMaxProfileLimit + StandardCDKeyProfileBonus
+	if cfg.App.MaxProfileLimit != expectedLimit {
+		t.Fatalf("MaxProfileLimit 计算错误: got=%d want=%d", cfg.App.MaxProfileLimit, expectedLimit)
 	}
 	if cfg.Runtime.MaxMemoryMB != 0 || cfg.Runtime.GCPercent != 100 {
 		t.Fatalf("Runtime 未补齐: got=%+v", cfg.Runtime)
@@ -107,6 +108,17 @@ browser: {}
 	}
 	if cfg.Automation.AllowTypeScriptBuild {
 		t.Fatalf("Automation.AllowTypeScriptBuild 默认应为 false")
+	}
+}
+
+func TestMinimumProfileLimitKeepsLegacyExternalReward(t *testing.T) {
+	t.Parallel()
+
+	keys := []string{legacyExternalRewardKey()}
+	expectedLimit := DefaultMaxProfileLimit + legacyExternalRewardBonus
+
+	if got := MinimumProfileLimitForUsedKeys(keys); got != expectedLimit {
+		t.Fatalf("历史外部奖励额度应保持兼容: got=%d want=%d", got, expectedLimit)
 	}
 }
 

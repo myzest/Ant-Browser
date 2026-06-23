@@ -326,10 +326,6 @@ export function DeleteGroup(arg1) {
   return window['go']['main']['App']['DeleteGroup'](arg1);
 }
 
-export function FetchRemoteAuthorProfile(arg1, arg2) {
-  return window['go']['main']['App']['FetchRemoteAuthorProfile'](arg1, arg2);
-}
-
 export function ForceQuit() {
   return window['go']['main']['App']['ForceQuit']();
 }
@@ -420,10 +416,6 @@ export function QuitAppOnly() {
 
 export function RedeemCDKey(arg1) {
   return window['go']['main']['App']['RedeemCDKey'](arg1);
-}
-
-export function RedeemGithubStar() {
-  return window['go']['main']['App']['RedeemGithubStar']();
 }
 
 export function ReloadConfig() {
