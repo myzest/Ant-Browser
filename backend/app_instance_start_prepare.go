@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"time"
 )
@@ -255,32 +256,44 @@ func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPo
 		"--disable-session-crashed-bubble",
 	}
 
-	hasFingerprint := false
-	for _, arg := range profile.FingerprintArgs {
-		if strings.HasPrefix(arg, "--fingerprint=") {
-			hasFingerprint = true
-			break
-		}
-	}
-	if !hasFingerprint {
-		seed := 0
-		for _, char := range profile.ProfileId {
-			seed = (seed << 5) - seed + int(char)
-		}
-		if seed < 0 {
-			seed = -seed
-		}
-		args = append(args, fmt.Sprintf("--fingerprint=%d", seed))
-	}
-
 	if effectiveProxy == "direct://" {
 		args = append(args, "--proxy-server=direct://")
 	} else if effectiveProxy != "" {
 		args = append(args, fmt.Sprintf("--proxy-server=%s", effectiveProxy))
 	}
 
-	args = append(args, profile.FingerprintArgs...)
+	args = append(args, buildChromiumFingerprintLaunchArgs(profile, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs)...)
 	args = append(args, sanitizedProfileLaunchArgs...)
 	args = append(args, sanitizedExtraLaunchArgs...)
 	return appendLaunchTargets(args, startURLs, defaultStartURLs, skipDefaultStartURLs, restoreLastSession)
+}
+
+func buildChromiumFingerprintLaunchArgs(profile *BrowserProfile, sanitizedProfileLaunchArgs []string, sanitizedExtraLaunchArgs []string) []string {
+	if profile == nil {
+		return nil
+	}
+	combinedUserArgs := make([]string, 0, len(profile.FingerprintArgs)+len(sanitizedProfileLaunchArgs)+len(sanitizedExtraLaunchArgs))
+	combinedUserArgs = append(combinedUserArgs, profile.FingerprintArgs...)
+	combinedUserArgs = append(combinedUserArgs, sanitizedProfileLaunchArgs...)
+	combinedUserArgs = append(combinedUserArgs, sanitizedExtraLaunchArgs...)
+
+	poolArgs, err := browser.BuildChromiumFingerprintPoolArgs(profile.ProfileId, goruntime.GOOS, combinedUserArgs)
+	if err != nil {
+		return appendLegacyChromiumFingerprintSeed(profile, combinedUserArgs)
+	}
+	return browser.MergeChromiumFingerprintArgs(poolArgs, profile.FingerprintArgs, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs)
+}
+
+func appendLegacyChromiumFingerprintSeed(profile *BrowserProfile, combinedUserArgs []string) []string {
+	if profile == nil {
+		return nil
+	}
+	fingerprintArgs := append([]string{}, profile.FingerprintArgs...)
+	for i := 0; i < len(combinedUserArgs); i++ {
+		arg := strings.TrimSpace(combinedUserArgs[i])
+		if strings.HasPrefix(arg, "--fingerprint=") || arg == "--fingerprint" {
+			return fingerprintArgs
+		}
+	}
+	return append([]string{fmt.Sprintf("--fingerprint=%d", browser.StableFingerprintSeed(profile.ProfileId))}, fingerprintArgs...)
 }

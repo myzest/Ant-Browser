@@ -461,6 +461,45 @@ func TestSanitizeManagedLaunchArgsKeepsUnmanagedFlags(t *testing.T) {
 	}
 }
 
+func TestBuildBrowserLaunchArgsAddsChromiumFingerprintPoolArgs(t *testing.T) {
+	t.Parallel()
+
+	profile := &BrowserProfile{
+		ProfileId:       "profile-chromium-pool",
+		FingerprintArgs: []string{"--lang=en-US"},
+		LaunchArgs:      []string{"--window-size", "1366,768"},
+	}
+	sanitizedLaunchArgs, _ := sanitizeManagedLaunchArgs(profile.LaunchArgs)
+	args := buildBrowserLaunchArgs(
+		profile,
+		"/tmp/ant-profile",
+		9222,
+		"direct://",
+		sanitizedLaunchArgs,
+		[]string{"--fingerprint-webgl-vendor=NVIDIA"},
+		nil,
+		nil,
+		true,
+		false,
+	)
+
+	if !containsArgPrefix(args, "--fingerprint=") {
+		t.Fatalf("expected fingerprint seed arg in %#v", args)
+	}
+	if !containsArg(args, "--fingerprint-brand=Chrome") && !containsArg(args, "--fingerprint-brand=Edge") {
+		t.Fatalf("expected pooled browser brand in %#v", args)
+	}
+	if !containsArg(args, "--lang=en-US") {
+		t.Fatalf("expected user lang to remain in %#v", args)
+	}
+	if containsArgPrefixValue(args, "--lang=", "zh-CN") || containsArgPrefixValue(args, "--window-size=", "1920,1080") {
+		t.Fatalf("pooled args should yield to explicit user keys: %#v", args)
+	}
+	if !containsArg(args, "--window-size") || !containsArg(args, "1366,768") || !containsArg(args, "--fingerprint-webgl-vendor=NVIDIA") {
+		t.Fatalf("expected launch/extra args to remain unchanged in %#v", args)
+	}
+}
+
 func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *testing.T) {
 	t.Parallel()
 
@@ -696,4 +735,31 @@ func writeDevToolsActivePortFile(t *testing.T, userDataDir string, port int) {
 	if err := os.WriteFile(filepath.Join(userDataDir, "DevToolsActivePort"), []byte(content), 0644); err != nil {
 		t.Fatalf("写入 DevToolsActivePort 失败: %v", err)
 	}
+}
+
+func containsArg(args []string, target string) bool {
+	for _, arg := range args {
+		if arg == target {
+			return true
+		}
+	}
+	return false
+}
+
+func containsArgPrefix(args []string, prefix string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, prefix) {
+			return true
+		}
+	}
+	return false
+}
+
+func containsArgPrefixValue(args []string, prefix string, value string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, prefix) && strings.TrimPrefix(arg, prefix) == value {
+			return true
+		}
+	}
+	return false
 }
