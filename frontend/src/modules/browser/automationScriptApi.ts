@@ -9,7 +9,6 @@ import {
   type AutomationScriptRunRecord,
   type AutomationScriptRecord,
 } from "./automationScripts";
-import { startBrowserInstanceByCode } from "./api/instances";
 
 const getBindings = async () => {
   try {
@@ -475,14 +474,7 @@ export async function runAutomationScript(
   input: string | AutomationScriptRunInput,
 ): Promise<AutomationScriptRunRecord> {
   const request = normalizeAutomationScriptRunInput(input);
-  const { launchCode, startByCodeBeforeRun, ...bindingRequest } = request;
-
-  if (startByCodeBeforeRun && launchCode) {
-    const startedProfile = await startBrowserInstanceByCode(launchCode);
-    if (!startedProfile) {
-      throw new Error(`通过 Launch Code 启动实例失败: ${launchCode}`);
-    }
-  }
+  const { launchCode: _launchCode, startByCodeBeforeRun: _startByCodeBeforeRun, ...bindingRequest } = request;
 
   const bindings: any = await getBindings();
   if (bindings?.AutomationScriptRunWithOptions) {

@@ -66,6 +66,18 @@ func TestPreparePlaywrightScriptWorkspaceCopiesScriptDirectory(t *testing.T) {
 	}
 }
 
+func TestNormalizeAutomationRunSelectorCopiesLaunchCodeToCode(t *testing.T) {
+	selector := map[string]any{"launchCode": "BUYER_001"}
+	normalized := normalizeAutomationRunSelector(selector)
+
+	if normalized["code"] != "BUYER_001" {
+		t.Fatalf("expected launchCode to be copied to code, got %+v", normalized)
+	}
+	if _, exists := selector["code"]; exists {
+		t.Fatalf("normalizeAutomationRunSelector should not mutate original selector, got %+v", selector)
+	}
+}
+
 func TestPreparePlaywrightScriptWorkspaceFallsBackWhenScriptDirMissing(t *testing.T) {
 	app := NewApp(t.TempDir())
 

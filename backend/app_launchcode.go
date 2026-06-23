@@ -9,13 +9,13 @@ import (
 
 // StartInstance 实现 launchcode.BrowserStarter 接口
 func (a *App) StartInstance(profileId string) (*browser.Profile, error) {
-	return a.BrowserInstanceStart(profileId)
+	return a.browserInstanceStartInternal(profileId, nil, nil, false, false, false, true, "", "")
 }
 
 // StartInstanceWithParams 实现 launchcode.BrowserStarterWithParams 接口
 func (a *App) StartInstanceWithParams(profileId string, params launchcode.LaunchRequestParams) (*browser.Profile, error) {
 	preferVisibleWindow := shouldPreferVisibleWindowForStartWithParams(params.StartURLs)
-	return a.browserInstanceStartInternal(profileId, params.LaunchArgs, params.StartURLs, params.SkipDefaultStartURLs, preferVisibleWindow, false, params.ProxyId, params.ProxyConfig)
+	return a.browserInstanceStartInternal(profileId, params.LaunchArgs, params.StartURLs, params.SkipDefaultStartURLs, preferVisibleWindow, false, true, params.ProxyId, params.ProxyConfig)
 }
 
 // StatusInstance 实现 launchcode.BrowserStatusProvider 接口
@@ -83,7 +83,7 @@ func (a *App) BrowserInstanceStartByCode(code string) (*browser.Profile, error) 
 	if err != nil {
 		return nil, err
 	}
-	return a.BrowserInstanceStart(profileId)
+	return a.browserInstanceStartInternal(profileId, nil, nil, false, true, false, false, "", "")
 }
 
 // GetLaunchServerInfo 返回 LaunchServer 的当前监听信息（Wails 绑定）

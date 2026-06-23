@@ -18,9 +18,9 @@ import { CookieManagerCard } from '../components/CookieManagerCard'
 import { SnapshotTab } from '../components/SnapshotTab'
 import { resolveActionErrorMessage, resolveActionFeedback } from '../utils/actionErrors'
 
-const resolveRuntimeStatus = (running: boolean, debugReady: boolean) => {
+const resolveRuntimeStatus = (running: boolean, debugReady: boolean, debugPort: number) => {
   if (!running) return { variant: 'warning' as const, label: '已停止' }
-  if (!debugReady) return { variant: 'info' as const, label: '运行中（待就绪）' }
+  if (debugPort > 0 && !debugReady) return { variant: 'info' as const, label: '运行中（待就绪）' }
   return { variant: 'success' as const, label: '运行中' }
 }
 
@@ -184,7 +184,7 @@ export function BrowserDetailPage() {
   const isStopping = pendingAction === 'stopping'
   const isRestarting = pendingAction === 'restarting'
   const isBusy = pendingAction !== null
-  const runtimeStatus = resolveRuntimeStatus(profile.running, profile.debugReady)
+  const runtimeStatus = resolveRuntimeStatus(profile.running, profile.debugReady, profile.debugPort)
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -242,7 +242,7 @@ export function BrowserDetailPage() {
                 </div>
                 <div className="flex justify-between">
                   <span>调试状态</span>
-                  <span>{profile.debugReady ? '已就绪' : (profile.running ? '等待就绪' : '-')}</span>
+                  <span>{profile.debugReady ? '已就绪' : (profile.running && profile.debugPort > 0 ? '等待就绪' : '-')}</span>
                 </div>
                 <div className="flex justify-between">
                   <span>最近启动</span>

@@ -48,5 +48,5 @@ func (a *App) BrowserInstanceRestart(profileId string) (*BrowserProfile, error) 
 	if _, err := a.BrowserInstanceStop(profileId); err != nil {
 		return nil, err
 	}
-	return a.BrowserInstanceStart(profileId)
+	return a.browserInstanceStartInternal(profileId, nil, nil, false, true, false, false, "", "")
 }

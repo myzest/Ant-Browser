@@ -161,7 +161,10 @@ func (a *App) getDebugPort(profileId string) (int, error) {
 	if !profile.Running {
 		return 0, fmt.Errorf("实例未运行")
 	}
-	if profile.DebugPort == 0 || !profile.DebugReady {
+	if profile.DebugPort <= 0 {
+		return 0, fmt.Errorf("实例已在无调试接管模式下运行；如需 Cookie、自动化或统一 CDP 入口，请先停止实例后再通过对应功能启动。")
+	}
+	if !profile.DebugReady {
 		return 0, fmt.Errorf("实例调试接口尚未就绪，请稍后重试")
 	}
 	return profile.DebugPort, nil

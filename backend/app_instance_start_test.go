@@ -118,6 +118,78 @@ func TestIsBrowserProfileLiveKeepsPendingDebugProcessAlive(t *testing.T) {
 	}
 }
 
+func TestRequireDebugBridgeReportsPendingDebugReadySeparately(t *testing.T) {
+	cmd := longLivedCommand(2 * time.Second)
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动长生命周期测试进程失败: %v", err)
+	}
+	defer func() {
+		if cmd.Process != nil {
+			_ = cmd.Process.Kill()
+			_, _ = cmd.Process.Wait()
+		}
+	}()
+
+	app := NewApp("")
+	app.browserMgr = browser.NewManager(config.DefaultConfig(), "")
+	app.browserMgr.Profiles = map[string]*BrowserProfile{
+		"profile-pending-debug": {
+			ProfileId:  "profile-pending-debug",
+			Running:    true,
+			Pid:        cmd.Process.Pid,
+			DebugPort:  freeLoopbackPort(t),
+			DebugReady: false,
+		},
+	}
+	app.browserMgr.BrowserProcesses = map[string]*exec.Cmd{
+		"profile-pending-debug": cmd,
+	}
+
+	input := newBrowserStartInput("profile-pending-debug", nil, nil, false, false, false, true, "", "")
+	profile, handled, err := app.resolveBrowserStartProfile(input)
+	if err == nil {
+		t.Fatal("期望调试接口未就绪时返回错误")
+	}
+	if !handled {
+		t.Fatal("期望运行中实例被处理")
+	}
+	if profile == nil || !strings.Contains(profile.LastError, "调试接口仍在就绪中") {
+		t.Fatalf("期望 LastError 提示调试接口仍在就绪中，实际 profile=%+v err=%v", profile, err)
+	}
+	if strings.Contains(err.Error(), "无调试接管模式") {
+		t.Fatalf("调试端口已分配但未就绪时不应提示无调试接管模式: %v", err)
+	}
+}
+
+func TestGetDebugPortDistinguishesNoBridgeFromPending(t *testing.T) {
+	app := NewApp("")
+	app.browserMgr = browser.NewManager(config.DefaultConfig(), "")
+	app.browserMgr.Profiles = map[string]*BrowserProfile{
+		"profile-no-bridge": {
+			ProfileId:  "profile-no-bridge",
+			Running:    true,
+			DebugPort:  0,
+			DebugReady: false,
+		},
+		"profile-pending": {
+			ProfileId:  "profile-pending",
+			Running:    true,
+			DebugPort:  9222,
+			DebugReady: false,
+		},
+	}
+
+	_, err := app.getDebugPort("profile-no-bridge")
+	if err == nil || !strings.Contains(err.Error(), "无调试接管模式") {
+		t.Fatalf("期望无调试桥错误，实际=%v", err)
+	}
+
+	_, err = app.getDebugPort("profile-pending")
+	if err == nil || !strings.Contains(err.Error(), "调试接口尚未就绪") {
+		t.Fatalf("期望调试接口未就绪错误，实际=%v", err)
+	}
+}
+
 func TestWaitBrowserDebugPortStableKeepsListeningPort(t *testing.T) {
 	t.Parallel()
 
@@ -264,6 +336,53 @@ func TestWaitBrowserDebugPortStableReturnsProcessExitDetail(t *testing.T) {
 	if !strings.Contains(exitErr.Detail(), "missing libEGL.dll") {
 		t.Fatalf("期望 stderr 细节被捕获，实际=%q", exitErr.Detail())
 	}
+}
+
+func TestWaitBrowserProcessStableReturnsProcessExitDetail(t *testing.T) {
+	t.Parallel()
+
+	cmd := stderrFailingCommand("manual chrome failed quickly")
+	monitor, err := newBrowserProcessMonitor(cmd)
+	if err != nil {
+		t.Fatalf("初始化浏览器进程监控失败: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动测试命令失败: %v", err)
+	}
+	monitor.Start()
+
+	err = waitBrowserProcessStable(monitor, 500*time.Millisecond)
+	if err == nil {
+		t.Fatal("期望手动启动稳定检测返回进程退出错误")
+	}
+
+	var exitErr *browserStartupExitError
+	if !errors.As(err, &exitErr) {
+		t.Fatalf("期望 browserStartupExitError，实际=%T %v", err, err)
+	}
+	if !strings.Contains(exitErr.Detail(), "manual chrome failed quickly") {
+		t.Fatalf("期望 stderr 细节被捕获，实际=%q", exitErr.Detail())
+	}
+}
+
+func TestWaitBrowserProcessStableAcceptsLiveProcess(t *testing.T) {
+	t.Parallel()
+
+	cmd := longLivedCommand(1500 * time.Millisecond)
+	monitor, err := newBrowserProcessMonitor(cmd)
+	if err != nil {
+		t.Fatalf("初始化浏览器进程监控失败: %v", err)
+	}
+	if err := cmd.Start(); err != nil {
+		t.Fatalf("启动测试命令失败: %v", err)
+	}
+	monitor.Start()
+
+	if err := waitBrowserProcessStable(monitor, 250*time.Millisecond); err != nil {
+		t.Fatalf("期望存活进程通过稳定检测，实际错误: %v", err)
+	}
+	_ = cmd.Process.Kill()
+	_ = monitor.Wait()
 }
 
 func TestWaitBrowserDebugPortStableAllowsDebugPortAfterLauncherExit(t *testing.T) {
@@ -503,6 +622,34 @@ func TestMergeLaunchArgsNormalizesSeparatedSingleValueFlags(t *testing.T) {
 	}
 }
 
+func TestBuildBrowserLaunchArgsOmitsDebugPortForManualStart(t *testing.T) {
+	t.Parallel()
+
+	profile := &BrowserProfile{ProfileId: "profile-manual", FingerprintArgs: []string{"--fingerprint=111"}}
+	got := buildBrowserLaunchArgs(profile, "/tmp/ant-profile", 0, "direct://", []string{"--disable-sync"}, nil, nil, nil, true, false)
+
+	if containsLaunchArgPrefix(got, "--remote-debugging-port") {
+		t.Fatalf("manual launch should not include remote debugging port: %v", got)
+	}
+	if containsLaunchArgPrefix(got, "--remote-debugging-address") {
+		t.Fatalf("manual launch should not include remote debugging address: %v", got)
+	}
+}
+
+func TestBuildBrowserLaunchArgsAddsLoopbackDebugAddressWhenDebugPortRequired(t *testing.T) {
+	t.Parallel()
+
+	profile := &BrowserProfile{ProfileId: "profile-debug", FingerprintArgs: []string{"--fingerprint=111"}}
+	got := buildBrowserLaunchArgs(profile, "/tmp/ant-profile", 9333, "direct://", nil, nil, nil, nil, true, false)
+
+	if !containsLaunchArg(got, "--remote-debugging-port=9333") {
+		t.Fatalf("debug launch should include remote debugging port: %v", got)
+	}
+	if !containsLaunchArg(got, "--remote-debugging-address=127.0.0.1") {
+		t.Fatalf("debug launch should bind remote debugging to loopback: %v", got)
+	}
+}
+
 func TestEnsureDefaultFingerprintNetworkArgsAddsWebRTCForProxy(t *testing.T) {
 	t.Parallel()
 
@@ -568,6 +715,18 @@ func TestResolveAutoWebRTCIPLaunchArgRemovesAutoForDirectProxy(t *testing.T) {
 	}
 }
 
+func TestResolveAutoWebRTCIPLaunchArgRemovesSplitAutoForDirectProxy(t *testing.T) {
+	t.Parallel()
+
+	app := &App{}
+	args := []string{"--fingerprint=111", "--fingerprint-webrtc-ip", "auto", "--lang=en-US"}
+	got := app.resolveAutoWebRTCIPLaunchArg("profile-direct", args, "direct://")
+	want := []string{"--fingerprint=111", "--lang=en-US"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveAutoWebRTCIPLaunchArg split direct mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
 func TestResolveAutoWebRTCIPLaunchArgRemovesAutoOnResolutionFailure(t *testing.T) {
 	t.Parallel()
 
@@ -578,6 +737,36 @@ func TestResolveAutoWebRTCIPLaunchArgRemovesAutoOnResolutionFailure(t *testing.T
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolveAutoWebRTCIPLaunchArg failure mismatch:\n got=%v\nwant=%v", got, want)
 	}
+}
+
+func TestResolveAutoWebRTCIPLaunchArgRemovesSplitAutoOnResolutionFailure(t *testing.T) {
+	t.Parallel()
+
+	app := &App{}
+	args := []string{"--fingerprint=111", "--fingerprint-webrtc-ip", "auto", "--lang=en-US"}
+	got := app.resolveAutoWebRTCIPLaunchArg("profile-proxy", args, "http://127.0.0.1:1")
+	want := []string{"--fingerprint=111", "--lang=en-US"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveAutoWebRTCIPLaunchArg split failure mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func containsLaunchArg(args []string, want string) bool {
+	for _, arg := range args {
+		if arg == want {
+			return true
+		}
+	}
+	return false
+}
+
+func containsLaunchArgPrefix(args []string, prefix string) bool {
+	for _, arg := range args {
+		if strings.HasPrefix(arg, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *testing.T) {
@@ -597,7 +786,7 @@ func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *tes
 		ProxyId:     "stored-proxy",
 		ProxyConfig: "http://127.0.0.1:18080",
 	}
-	input := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, "runtime-proxy", "")
+	input := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, false, "runtime-proxy", "")
 
 	effectiveProxy, exitIPCacheKey, bridgeKey, releaseBridge, err := app.resolveBrowserStartProxy(input, profile)
 	if err != nil {
@@ -616,7 +805,7 @@ func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *tes
 		t.Fatalf("temporary proxy should not mutate profile: %+v", profile)
 	}
 
-	fallbackInput := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, "missing-proxy", "http://127.0.0.1:38080")
+	fallbackInput := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, false, "missing-proxy", "http://127.0.0.1:38080")
 	effectiveProxy, exitIPCacheKey, bridgeKey, releaseBridge, err = app.resolveBrowserStartProxy(fallbackInput, profile)
 	if err != nil {
 		t.Fatalf("fallback temporary proxy returned error: %v", err)

@@ -243,7 +243,7 @@ Ant 参数映射：
 短期落地：
 
 - 默认 `--webrtc-ip-handling-policy=disable_non_proxied_udp`。
-- 默认 `--fingerprint-webrtc-ip=auto`。
+- 有代理时默认 `--fingerprint-webrtc-ip=auto`。
 - 没有代理时不要伪造一个随机公网 IP。
 
 中长期落地：
@@ -491,8 +491,8 @@ UI 可展示“指纹健康度”：
 目标：先减少明显异常组合。
 
 - 固定 profile seed，同一浏览器 profile 不在每次启动时随机漂移。
-- 默认启用 `--fingerprint-webrtc-ip=auto`。
-- 默认启用代理出口 IP 与 WebRTC 一致。
+- 有代理时默认启用 `--fingerprint-webrtc-ip=auto`。
+- 默认启用代理出口 IP 与 WebRTC 一致，直连时不伪造随机公网 IP。
 - headed 模式避免 viewport emulation。
 - 默认参数中移除/覆盖自动化泄露参数。
 - 增加 Fingerprint.com、BrowserScan、CreepJS 的手动检测清单。

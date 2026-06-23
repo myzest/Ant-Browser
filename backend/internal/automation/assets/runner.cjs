@@ -214,6 +214,14 @@ function buildLaunchRequestBody(defaultSelector, options) {
   const launchOptions = options && typeof options === 'object' ? options : {};
   const body = {};
 
+  if (
+    !Object.prototype.hasOwnProperty.call(launchOptions, 'code') &&
+    typeof launchOptions.launchCode === 'string' &&
+    launchOptions.launchCode.trim()
+  ) {
+    body.code = launchOptions.launchCode;
+  }
+
   for (const key of [
     'code',
     'key',
@@ -241,10 +249,19 @@ function buildLaunchRequestBody(defaultSelector, options) {
       ? launchOptions.selector
       : defaultSelector;
   if (selector && typeof selector === 'object' && !Array.isArray(selector) && Object.keys(selector).length > 0) {
-    body.selector = selector;
+    body.selector = normalizeLaunchSelectorPayload(selector);
   }
 
   return body;
+}
+
+function normalizeLaunchSelectorPayload(selector) {
+  const normalized = { ...selector };
+  if (!normalized.code && typeof normalized.launchCode === 'string' && normalized.launchCode.trim()) {
+    normalized.code = normalized.launchCode;
+  }
+  delete normalized.launchCode;
+  return normalized;
 }
 
 async function loadScriptModule(scriptPath) {

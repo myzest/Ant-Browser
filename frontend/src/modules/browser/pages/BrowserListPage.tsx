@@ -31,14 +31,14 @@ import {
   validateProxyConfig,
 } from '../api'
 
-const resolveProfileStatus = (running: boolean, debugReady: boolean, starting: boolean, stopping: boolean) => {
+const resolveProfileStatus = (running: boolean, debugReady: boolean, debugPort: number, starting: boolean, stopping: boolean) => {
   if (starting) {
     return { variant: 'info' as const, label: '启动中' }
   }
   if (stopping) {
     return { variant: 'default' as const, label: '停止中' }
   }
-  if (running && !debugReady) {
+  if (running && debugPort > 0 && !debugReady) {
     return { variant: 'info' as const, label: '运行中（待就绪）' }
   }
   if (running) {
@@ -337,7 +337,7 @@ export function BrowserListPage() {
   const isProfileBusy = (profileId: string) => isProfileStarting(profileId) || isProfileStopping(profileId)
 
   const getProfileStatus = (profile: BrowserProfile) => (
-    resolveProfileStatus(profile.running, profile.debugReady, isProfileStarting(profile.profileId), isProfileStopping(profile.profileId))
+    resolveProfileStatus(profile.running, profile.debugReady, profile.debugPort, isProfileStarting(profile.profileId), isProfileStopping(profile.profileId))
   )
 
   const filteredProfiles = useMemo(() => {

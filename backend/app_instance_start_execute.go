@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browserStartPlan) (*BrowserProfile, error) {
@@ -39,6 +40,39 @@ func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browser
 		return profile, startErr
 	}
 	monitor.Start()
+
+	if !plan.requireDebugBridge {
+		if err := waitBrowserProcessStable(monitor, plan.startStableWindow); err != nil {
+			startErr := fmt.Errorf("%s", describeBrowserReadyFailure(plan.chromeBinaryPath, 0, plan.startStableWindow, err))
+			log.Error("浏览器启动后提前退出",
+				logger.F("profile_id", input.ProfileID),
+				logger.F("chrome", plan.chromeBinaryPath),
+				logger.F("error", err.Error()),
+				logger.F("reason", startErr.Error()),
+				logger.F("args", redactLaunchArgsForLog(plan.args)),
+			)
+			profile.LastError = startErr.Error()
+			return profile, startErr
+		}
+
+		a.markProfileRunningLocked(input.ProfileID, profile, cmd, cmd.Process.Pid, 0, false, "")
+		if plan.acquiredXrayBridgeKey != "" {
+			a.bindProfileXrayBridge(input.ProfileID, plan.acquiredXrayBridgeKey)
+			plan.releaseXrayBridge = false
+		}
+
+		log.Info("实例启动",
+			logger.F("profile_id", input.ProfileID),
+			logger.F("debug_bridge", false),
+			logger.F("pid", profile.Pid),
+			logger.F("proxy", proxy.RedactProxyURL(plan.effectiveProxy)),
+			logger.F("args", redactLaunchArgsForLog(plan.args)),
+		)
+		a.emitBrowserInstanceStarted(profile, false)
+
+		go a.waitBrowserProcess(input.ProfileID, monitor)
+		return profile, nil
+	}
 
 	var lastStartErr error
 	for attempt := 1; attempt <= plan.maxStartAttempts; attempt++ {
@@ -127,4 +161,22 @@ func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browser
 	startErr := fmt.Errorf("实例启动失败：浏览器在等待窗口内仍未就绪")
 	profile.LastError = startErr.Error()
 	return profile, startErr
+}
+
+func waitBrowserProcessStable(monitor *browserProcessMonitor, stableFor time.Duration) error {
+	if monitor == nil {
+		return fmt.Errorf("browser process monitor is nil")
+	}
+	if stableFor <= 0 {
+		stableFor = 1200 * time.Millisecond
+	}
+	timer := time.NewTimer(stableFor)
+	defer timer.Stop()
+
+	select {
+	case <-monitor.Done():
+		return newBrowserStartupExitError(monitor.Result())
+	case <-timer.C:
+		return nil
+	}
 }

@@ -83,6 +83,35 @@ export const KEY_MAP: Record<string, keyof FingerprintConfig> = {
   '--fingerprint-touch-points': 'touchPoints',
 }
 
+function filterUnknownArgs(unknownArgs?: string[]): string[] {
+  if (!unknownArgs || unknownArgs.length === 0) {
+    return []
+  }
+
+  const filtered: string[] = []
+  for (let i = 0; i < unknownArgs.length; i += 1) {
+    const arg = unknownArgs[i]?.trim() || ''
+    if (!arg) {
+      continue
+    }
+
+    const eqIdx = arg.indexOf('=')
+    const key = eqIdx === -1 ? arg : arg.slice(0, eqIdx)
+    if (KEY_MAP[key]) {
+      if (eqIdx === -1) {
+        const next = unknownArgs[i + 1]?.trim() || ''
+        if (next && !next.startsWith('-')) {
+          i += 1
+        }
+      }
+      continue
+    }
+
+    filtered.push(arg)
+  }
+  return filtered
+}
+
 // FingerprintConfig → string[]
 export function serialize(config: FingerprintConfig): string[] {
   const args: string[] = []
@@ -121,17 +150,44 @@ export function serialize(config: FingerprintConfig): string[] {
   if (config.mediaDevices) args.push(`--fingerprint-media-devices=${config.mediaDevices}`)
   if (config.touchPoints) args.push(`--fingerprint-touch-points=${config.touchPoints}`)
 
-  return [...args, ...(config.unknownArgs ?? [])]
+  return [...args, ...filterUnknownArgs(config.unknownArgs)]
+}
+
+function applyParsedValue(config: FingerprintConfig, field: keyof FingerprintConfig, val: string) {
+  if (field === 'canvasNoise' || field === 'audioNoise' || field === 'doNotTrack') {
+    ;(config as Record<string, unknown>)[field] = val === 'true'
+  } else if (field === 'resolution') {
+    if (PRESET_RESOLUTIONS.includes(val)) {
+      config.resolution = val
+      config.customResolution = undefined
+    } else {
+      config.resolution = 'custom'
+      config.customResolution = val
+    }
+  } else {
+    ;(config as Record<string, unknown>)[field] = val
+  }
 }
 
 // string[] → FingerprintConfig
 export function deserialize(args: string[]): FingerprintConfig {
   const config: FingerprintConfig = { unknownArgs: [] }
 
-  for (const arg of args) {
+  for (let i = 0; i < args.length; i += 1) {
+    const arg = args[i]?.trim() || ''
+    if (!arg) {
+      continue
+    }
     const eqIdx = arg.indexOf('=')
     if (eqIdx === -1) {
-      config.unknownArgs!.push(arg)
+      const field = KEY_MAP[arg]
+      const next = args[i + 1]?.trim() || ''
+      if (!field || !next || next.startsWith('-')) {
+        config.unknownArgs!.push(arg)
+        continue
+      }
+      applyParsedValue(config, field, next)
+      i += 1
       continue
     }
     const key = arg.slice(0, eqIdx)
@@ -143,18 +199,7 @@ export function deserialize(args: string[]): FingerprintConfig {
       continue
     }
 
-    if (field === 'canvasNoise' || field === 'audioNoise' || field === 'doNotTrack') {
-      (config as Record<string, unknown>)[field] = val === 'true'
-    } else if (field === 'resolution') {
-      if (PRESET_RESOLUTIONS.includes(val)) {
-        config.resolution = val
-      } else {
-        config.resolution = 'custom'
-        config.customResolution = val
-      }
-    } else {
-      (config as Record<string, unknown>)[field] = val
-    }
+    applyParsedValue(config, field, val)
   }
 
   return config

@@ -164,6 +164,10 @@ func TestAutomationScriptRunWithOptionsPrestartsStoredTargetForConnectOnlyScript
 	if profile == nil {
 		t.Fatal("create profile returned nil")
 	}
+	code, err := app.launchCodeSvc.SetCode(profile.ProfileId, "BUYER_CONNECT")
+	if err != nil {
+		t.Fatalf("set launch code failed: %v", err)
+	}
 	app.browserMgr.Profiles[profile.ProfileId].Running = true
 	app.browserMgr.Profiles[profile.ProfileId].DebugReady = true
 	app.browserMgr.Profiles[profile.ProfileId].DebugPort = debugPort
@@ -195,7 +199,7 @@ func TestAutomationScriptRunWithOptionsPrestartsStoredTargetForConnectOnlyScript
 		TargetConfig: automation.ScriptTargetConfig{
 			Mode: "existing",
 			Selector: automation.ScriptTargetSelector{
-				ProfileID: profile.ProfileId,
+				Code: code,
 			},
 		},
 	})
@@ -304,30 +308,37 @@ module.exports = {
 
 const automationTestRunnerScript = `const fs = require('fs')
 const path = require('path')
+const { chromium } = require('playwright-core')
 
 async function main() {
   const payloadPath = process.argv[2]
   const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf8'))
-  const script = require(payload.ScriptPath)
+  const script = require(payload.scriptPath)
   const startedAt = new Date().toISOString()
   const result = await script.run({
-    selector: payload.Selector || {},
-    params: payload.Params || {},
+    selector: payload.selector || {},
+    params: payload.params || {},
     artifact: (name) => {
-      const dir = payload.ArtifactDir || path.dirname(payload.ScriptPath)
+      const dir = payload.artifactDir || path.dirname(payload.scriptPath)
       fs.mkdirSync(dir, { recursive: true })
       return path.join(dir, name)
     },
     log: () => {},
     launch: async () => ({ ok: true }),
-    connect: async () => ({
-      browser: { contexts: () => [] },
-      context: {
-        pages: () => [],
-        newPage: async () => ({})
-      },
-      page: null
-    })
+    connect: async (session = {}) => {
+      const endpoint = String(session.cdpUrl || payload.launchBaseUrl || '').trim()
+      if (!endpoint) {
+        throw new Error('missing cdp endpoint')
+      }
+      const browser = await chromium.connectOverCDP(endpoint)
+      const context = browser.contexts()[0] || null
+      return {
+        browser,
+        context,
+        page: context && context.pages().length > 0 ? context.pages()[0] : null,
+        session: { ...session, cdpUrl: endpoint }
+      }
+    }
   })
 
   console.log(JSON.stringify({

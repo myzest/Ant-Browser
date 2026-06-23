@@ -246,6 +246,87 @@ func TestRunScriptTaskLaunchFiltersNonLaunchParams(t *testing.T) {
 	}
 }
 
+func TestRunScriptTaskLaunchNormalizesLaunchCodeSelector(t *testing.T) {
+	nodeExecPath := lookupNodeExecutable(t)
+
+	cfg := config.DefaultConfig()
+	cfg.Automation.Enabled = true
+	cfg.Automation.NodeSource = config.AutomationNodeSourceSystem
+	cfg.Automation.SystemNodePath = nodeExecPath
+	cfg.Automation.NodeVersion = "test-node"
+	cfg.Automation.PlaywrightCoreVersion = "1.59.0"
+	cfg.Automation.RuntimeVersion = "test-runtime"
+
+	manager := NewManager(t.TempDir(), cfg, nil, Options{})
+
+	state := manager.CurrentState()
+	if err := writeRunnerScript(state.RunnerPath); err != nil {
+		t.Fatalf("write runner script failed: %v", err)
+	}
+	if err := writeMockPlaywrightModule(state.RuntimeDir, cfg.Automation.PlaywrightCoreVersion); err != nil {
+		t.Fatalf("write mock playwright module failed: %v", err)
+	}
+
+	var received struct {
+		Selector map[string]any `json:"selector"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("unexpected method: %s", r.Method)
+		}
+		if r.URL.Path != "/api/launch" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&received); err != nil {
+			t.Fatalf("decode launch request body failed: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":        true,
+			"profileId": "profile-script",
+			"debugPort": 9333,
+			"cdpUrl":    "http://127.0.0.1:9333",
+		})
+	}))
+	defer server.Close()
+
+	scriptDir := filepath.Join(state.RuntimeDir, "tmp", "scripts")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("create script dir failed: %v", err)
+	}
+	scriptPath := filepath.Join(scriptDir, "script-launch-code.cjs")
+	scriptSource := `module.exports.run = async ({ launch, selector }) => {
+  const session = await launch({ selector })
+  return {
+    ok: true,
+    summary: '脚本执行成功',
+    profileId: session.profileId,
+  }
+}`
+	if err := os.WriteFile(scriptPath, []byte(scriptSource), 0o644); err != nil {
+		t.Fatalf("write script failed: %v", err)
+	}
+
+	result, err := manager.RunScriptTask(context.Background(), ScriptTaskRequest{
+		TaskKey:       "script:launch-code-selector",
+		ScriptPath:    scriptPath,
+		Selector:      map[string]any{"launchCode": "BUYER_READY"},
+		LaunchBaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("RunScriptTask returned error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected script task to succeed, got %+v", result)
+	}
+	if received.Selector["code"] != "BUYER_READY" {
+		t.Fatalf("expected launchCode selector to be sent as code, got %+v", received.Selector)
+	}
+	if _, exists := received.Selector["launchCode"]; exists {
+		t.Fatalf("expected launchCode field to be omitted from launch request, got %+v", received.Selector)
+	}
+}
+
 func TestRunScriptTaskFallsBackToLaunchBaseURLWhenSessionEndpointIsInvalid(t *testing.T) {
 	nodeExecPath := lookupNodeExecutable(t)
 
