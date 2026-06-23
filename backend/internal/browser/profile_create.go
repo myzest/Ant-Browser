@@ -42,7 +42,7 @@ func (m *Manager) Create(input ProfileInput) (*Profile, error) {
 		ProfileName:     input.ProfileName,
 		UserDataDir:     userDataDir,
 		CoreId:          coreId,
-		FingerprintArgs: input.FingerprintArgs,
+		FingerprintArgs: m.defaultFingerprintArgsForProfile(profileId, input.FingerprintArgs, nil, ""),
 		ProxyId:         resolvedProxy.ProxyId,
 		ProxyConfig:     resolvedProxy.ProxyConfig,
 		LaunchArgs:      input.LaunchArgs,

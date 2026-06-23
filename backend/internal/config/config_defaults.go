@@ -1,6 +1,7 @@
 package config
 
 import (
+	"ant-chrome/backend/internal/fingerprint"
 	"fmt"
 	"path/filepath"
 	goruntime "runtime"
@@ -289,14 +290,7 @@ func DefaultConfig() *Config {
 }
 
 func defaultFingerprintArgsForOS(goos string) []string {
-	platform := "windows"
-	switch strings.ToLower(strings.TrimSpace(goos)) {
-	case "darwin":
-		platform = "mac"
-	case "linux":
-		platform = "linux"
-	}
-	return []string{"--fingerprint-brand=Chrome", "--fingerprint-platform=" + platform}
+	return fingerprint.DefaultArgsForOS(goos)
 }
 func DefaultAutomationRuntimeVersion(nodeVersion, playwrightVersion string) string {
 	return fmt.Sprintf("node-%s-playwright-core-%s", strings.TrimSpace(nodeVersion), strings.TrimSpace(playwrightVersion))

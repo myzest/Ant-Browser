@@ -2,10 +2,10 @@ package backend
 
 import (
 	"ant-chrome/backend/internal/logger"
+	"ant-chrome/backend/internal/proxy"
 	"fmt"
 	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browserStartPlan) (*BrowserProfile, error) {
@@ -54,10 +54,10 @@ func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browser
 				logger.F("profile_id", input.ProfileID),
 				logger.F("debug_port", stableDebugPort),
 				logger.F("pid", profile.Pid),
-				logger.F("proxy", plan.effectiveProxy),
+				logger.F("proxy", proxy.RedactProxyURL(plan.effectiveProxy)),
 				logger.F("attempt", attempt),
 				logger.F("max_attempts", plan.maxStartAttempts),
-				logger.F("args", strings.Join(plan.args, " ")),
+				logger.F("args", redactLaunchArgsForLog(plan.args)),
 			)
 			a.emitBrowserInstanceStarted(profile, false)
 

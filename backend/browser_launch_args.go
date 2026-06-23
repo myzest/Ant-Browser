@@ -2,6 +2,7 @@ package backend
 
 import (
 	"ant-chrome/backend/internal/logger"
+	"ant-chrome/backend/internal/proxy"
 	"strings"
 )
 
@@ -16,6 +17,31 @@ var managedLaunchArgSpecs = []managedLaunchArgSpec{
 	{prefix: "--remote-debugging-address", takesValue: true},
 	{prefix: "--remote-debugging-pipe", takesValue: false},
 	{prefix: "--proxy-server", takesValue: true},
+	{prefix: "--enable-automation", takesValue: false},
+	{prefix: "--enable-unsafe-swiftshader", takesValue: false},
+}
+
+var singleValueLaunchArgPrefixes = []string{
+	"--fingerprint",
+	"--fingerprint-audio-noise",
+	"--fingerprint-brand",
+	"--fingerprint-canvas-noise",
+	"--fingerprint-color-depth",
+	"--fingerprint-device-memory",
+	"--fingerprint-fonts",
+	"--fingerprint-hardware-concurrency",
+	"--fingerprint-locale",
+	"--fingerprint-media-devices",
+	"--fingerprint-platform",
+	"--fingerprint-timezone",
+	"--fingerprint-touch-points",
+	"--fingerprint-webgl-renderer",
+	"--fingerprint-webgl-vendor",
+	"--fingerprint-webrtc-ip",
+	"--lang",
+	"--timezone",
+	"--webrtc-ip-handling-policy",
+	"--window-size",
 }
 
 func sanitizeManagedLaunchArgs(args []string) ([]string, []string) {
@@ -57,6 +83,111 @@ func matchManagedLaunchArg(arg string) (managedLaunchArgSpec, bool) {
 		}
 	}
 	return managedLaunchArgSpec{}, false
+}
+
+func mergeLaunchArgs(groups ...[]string) []string {
+	if len(groups) == 0 {
+		return nil
+	}
+
+	out := make([]string, 0)
+	indexByKey := map[string]int{}
+	for _, group := range groups {
+		for i := 0; i < len(group); i++ {
+			raw := group[i]
+			arg := strings.TrimSpace(raw)
+			if arg == "" {
+				continue
+			}
+			key, ok := singleValueLaunchArgKey(arg)
+			if ok {
+				if !strings.Contains(arg, "=") && i+1 < len(group) {
+					next := strings.TrimSpace(group[i+1])
+					if next != "" && !strings.HasPrefix(next, "-") {
+						arg = key + "=" + next
+						i++
+					}
+				}
+				if index, exists := indexByKey[key]; exists {
+					out[index] = arg
+					continue
+				}
+				indexByKey[key] = len(out)
+			}
+			out = append(out, arg)
+		}
+	}
+	return out
+}
+
+func singleValueLaunchArgKey(arg string) (string, bool) {
+	key := arg
+	if eq := strings.Index(arg, "="); eq >= 0 {
+		key = arg[:eq]
+	}
+	key = strings.ToLower(strings.TrimSpace(key))
+	for _, prefix := range singleValueLaunchArgPrefixes {
+		if key == prefix {
+			return key, true
+		}
+	}
+	return "", false
+}
+
+func ensureDefaultFingerprintNetworkArgs(args []string, effectiveProxy string) []string {
+	out := append([]string{}, args...)
+	if !hasLaunchArgKey(out, "--webrtc-ip-handling-policy") {
+		out = append(out, "--webrtc-ip-handling-policy=disable_non_proxied_udp")
+	}
+	if shouldResolveFingerprintWebRTCIP(effectiveProxy) && !hasLaunchArgKey(out, "--fingerprint-webrtc-ip") {
+		out = append(out, "--fingerprint-webrtc-ip=auto")
+	}
+	return out
+}
+
+func hasLaunchArgKey(args []string, want string) bool {
+	want = strings.ToLower(strings.TrimSpace(want))
+	for _, arg := range args {
+		key, ok := singleValueLaunchArgKey(arg)
+		if ok && key == want {
+			return true
+		}
+	}
+	return false
+}
+
+func shouldResolveFingerprintWebRTCIP(effectiveProxy string) bool {
+	value := strings.TrimSpace(effectiveProxy)
+	return value != "" && !strings.EqualFold(value, "direct://")
+}
+
+func redactLaunchArgsForLog(args []string) string {
+	if len(args) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(args))
+	for i := 0; i < len(args); i++ {
+		arg := strings.TrimSpace(args[i])
+		if arg == "" {
+			continue
+		}
+		lower := strings.ToLower(arg)
+		if strings.HasPrefix(lower, "--proxy-server=") {
+			key, value, _ := strings.Cut(arg, "=")
+			out = append(out, key+"="+proxy.RedactProxyURL(value))
+			continue
+		}
+		if strings.EqualFold(arg, "--proxy-server") && i+1 < len(args) {
+			next := strings.TrimSpace(args[i+1])
+			if next != "" && !strings.HasPrefix(next, "-") {
+				out = append(out, "--proxy-server="+proxy.RedactProxyURL(next))
+				i++
+				continue
+			}
+		}
+		out = append(out, arg)
+	}
+	return strings.Join(out, " ")
 }
 
 func logManagedLaunchArgOverrides(log *logger.Logger, profileId string, source string, managedArgs []string) {

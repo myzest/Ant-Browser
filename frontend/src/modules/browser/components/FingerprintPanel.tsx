@@ -1,6 +1,8 @@
 ﻿import { useEffect, useState } from 'react'
-import { ChevronDown, ChevronUp, RefreshCw, Wand2 } from 'lucide-react'
-import { ConfirmModal, FormItem, Input, Select, Textarea } from '../../../shared/components'
+import { ChevronDown, ChevronUp, RefreshCw, ShieldCheck, Wand2 } from 'lucide-react'
+import { Button, ConfirmModal, FormItem, Input, Select, Textarea } from '../../../shared/components'
+import { generateFingerprintProfile, validateFingerprintProfile } from '../api/fingerprint'
+import type { FingerprintHealthReport } from '../types'
 import {
   type FingerprintConfig,
   FINGERPRINT_PRESETS,
@@ -170,19 +172,54 @@ const PRESET_OPTIONS = [
   ...FINGERPRINT_PRESETS.map(p => ({ value: p.id, label: p.name })),
 ]
 
+const DEVICE_CLASS_OPTIONS = [
+  { value: 'office', label: '办公电脑' },
+  { value: 'laptop', label: '笔记本' },
+  { value: 'workstation', label: '高性能桌面' },
+  { value: 'gaming', label: '游戏主机' },
+  { value: 'light_linux', label: '轻量 Linux' },
+]
+
+const COUNTRY_OPTIONS = [
+  { value: 'CN', label: '中国' },
+  { value: 'US', label: '美国' },
+  { value: 'GB', label: '英国' },
+  { value: 'DE', label: '德国' },
+  { value: 'FR', label: '法国' },
+  { value: 'JP', label: '日本' },
+  { value: 'KR', label: '韩国' },
+  { value: 'SG', label: '新加坡' },
+]
+
 export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
   const [config, setConfig] = useState<FingerprintConfig>(() => deserialize(value))
   const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [, setCustomRenderer] = useState('')
+  const [customRendererOpen, setCustomRendererOpen] = useState(false)
   const [confirmSeedOpen, setConfirmSeedOpen] = useState(false)
+  const [quickPlatform, setQuickPlatform] = useState('windows')
+  const [quickCountry, setQuickCountry] = useState('CN')
+  const [quickDevice, setQuickDevice] = useState('office')
+  const [generating, setGenerating] = useState(false)
+  const [validating, setValidating] = useState(false)
+  const [health, setHealth] = useState<FingerprintHealthReport | null>(null)
+  const [healthArgsKey, setHealthArgsKey] = useState('')
+
+  const syncQuickControls = (next: FingerprintConfig) => {
+    syncQuickControlsFromConfig(next, setQuickPlatform, setQuickCountry)
+  }
 
   useEffect(() => {
-    setConfig(deserialize(value))
+    const parsed = deserialize(value)
+    setConfig(parsed)
+    syncQuickControls(parsed)
   }, [value.join('\n')])
 
   const update = (patch: Partial<FingerprintConfig>) => {
     const next = { ...config, ...patch }
     setConfig(next)
+    setHealth(null)
+    setHealthArgsKey('')
+    syncQuickControls(next)
     onChange(serialize(next))
   }
 
@@ -197,6 +234,9 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
       unknownArgs: config.unknownArgs,
     }
     setConfig(next)
+    setHealth(null)
+    setHealthArgsKey('')
+    syncQuickControls(next)
     onChange(serialize(next))
   }
 
@@ -204,7 +244,48 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
     const args = text.split('\n').map(s => s.trim()).filter(Boolean)
     const parsed = deserialize(args)
     setConfig(parsed)
+    setHealth(null)
+    setHealthArgsKey('')
+    syncQuickControls(parsed)
     onChange(serialize(parsed))
+  }
+
+  const handleGenerate = async () => {
+    if (generating || validating) return
+    setGenerating(true)
+    try {
+      const region = regionForCountry(quickCountry)
+      const result = await generateFingerprintProfile({
+        currentArgs: serialize(config),
+        platform: quickPlatform,
+        country: quickCountry,
+        locale: region.locale,
+        timezone: region.timezone,
+        deviceClass: quickDevice,
+        preserveUnknownArgs: true,
+      })
+      const parsed = deserialize(result.args || [])
+      setConfig(parsed)
+      setHealth(result.health || null)
+      const nextArgs = serialize(parsed)
+      setHealthArgsKey(nextArgs.join('\n'))
+      syncQuickControls(parsed)
+      onChange(nextArgs)
+    } finally {
+      setGenerating(false)
+    }
+  }
+
+  const handleValidate = async () => {
+    if (generating || validating) return
+    setValidating(true)
+    try {
+      const args = serialize(config)
+      setHealth(await validateFingerprintProfile({ args }))
+      setHealthArgsKey(args.join('\n'))
+    } finally {
+      setValidating(false)
+    }
   }
 
   const rendererOptions = config.webglVendor
@@ -216,6 +297,8 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
     : false
 
   const advancedText = serialize(config).join('\n')
+  const currentHealth = health && healthArgsKey === advancedText ? health : null
+  const busy = generating || validating
 
   return (
     <div className="space-y-4">
@@ -273,6 +356,50 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
         <span className="text-xs text-[var(--color-text-muted)] shrink-0">选择后覆盖当前配置</span>
       </div>
 
+      <div className="p-3 rounded-lg bg-[var(--color-bg-hover)] border border-[var(--color-border)] space-y-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+          <FormItem label="平台">
+            <Select value={quickPlatform} onChange={e => setQuickPlatform(e.target.value)} options={PLATFORM_OPTIONS.filter(option => option.value)} />
+          </FormItem>
+          <FormItem label="地区">
+            <Select value={quickCountry} onChange={e => setQuickCountry(e.target.value)} options={COUNTRY_OPTIONS} />
+          </FormItem>
+          <FormItem label="设备类型">
+            <Select value={quickDevice} onChange={e => setQuickDevice(e.target.value)} options={DEVICE_CLASS_OPTIONS} />
+          </FormItem>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button type="button" size="sm" onClick={() => void handleGenerate()} loading={generating} disabled={busy}>
+            <Wand2 className="w-3.5 h-3.5" />
+            生成指纹
+          </Button>
+          <Button type="button" size="sm" variant="secondary" onClick={() => void handleValidate()} loading={validating} disabled={busy}>
+            <ShieldCheck className="w-3.5 h-3.5" />
+            健康检查
+          </Button>
+          {currentHealth && (
+            <span className={`text-xs px-2 py-1 rounded border ${
+              currentHealth.status === 'red'
+                ? 'text-red-600 border-red-200 bg-red-50'
+                : currentHealth.status === 'yellow'
+                  ? 'text-amber-700 border-amber-200 bg-amber-50'
+                  : 'text-green-600 border-green-200 bg-green-50'
+            }`}>
+              {currentHealth.status === 'red' ? '高风险' : currentHealth.status === 'yellow' ? '需复核' : '健康'} · {currentHealth.issues?.length || 0} 项
+            </span>
+          )}
+        </div>
+        {currentHealth && currentHealth.issues?.length > 0 && (
+          <div className="space-y-1">
+            {currentHealth.issues.slice(0, 3).map(issue => (
+              <p key={`${issue.code}-${issue.field}`} className="text-xs text-[var(--color-text-muted)]">
+                {issue.field}: {issue.message}
+              </p>
+            ))}
+          </div>
+        )}
+      </div>
+
       {/* 基础身份 */}
       <div>
         <p className="text-xs font-medium text-[var(--color-text-muted)] mb-2 uppercase tracking-wide">基础身份</p>
@@ -281,7 +408,14 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
             <Select value={config.brand ?? ''} onChange={e => update({ brand: e.target.value || undefined })} options={BRAND_OPTIONS} />
           </FormItem>
           <FormItem label="操作系统">
-            <Select value={config.platform ?? ''} onChange={e => update({ platform: e.target.value || undefined })} options={PLATFORM_OPTIONS} />
+            <Select
+              value={config.platform ?? ''}
+              onChange={e => {
+                if (e.target.value) setQuickPlatform(e.target.value)
+                update({ platform: e.target.value || undefined })
+              }}
+              options={PLATFORM_OPTIONS}
+            />
           </FormItem>
           <FormItem label="语言">
             <Select value={config.lang ?? ''} onChange={e => update({ lang: e.target.value || undefined })} options={LANG_OPTIONS} />
@@ -334,12 +468,15 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
           <FormItem label="WebGL 供应商">
             <Select
               value={config.webglVendor ?? ''}
-              onChange={e => update({ webglVendor: e.target.value || undefined, webglRenderer: undefined })}
+              onChange={e => {
+                setCustomRendererOpen(false)
+                update({ webglVendor: e.target.value || undefined, webglRenderer: undefined })
+              }}
               options={WEBGL_VENDOR_OPTIONS}
             />
           </FormItem>
           <FormItem label="WebGL 渲染器">
-            {isCustomRenderer ? (
+            {customRendererOpen || isCustomRenderer ? (
               <Input
                 value={config.webglRenderer ?? ''}
                 onChange={e => update({ webglRenderer: e.target.value || undefined })}
@@ -350,9 +487,10 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
                 value={config.webglRenderer ?? ''}
                 onChange={e => {
                   if (e.target.value === 'custom') {
-                    setCustomRenderer('')
+                    setCustomRendererOpen(true)
                     update({ webglRenderer: undefined })
                   } else {
+                    setCustomRendererOpen(false)
                     update({ webglRenderer: e.target.value || undefined })
                   }
                 }}
@@ -384,6 +522,13 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormItem label="WebRTC 策略">
             <Select value={config.webrtcPolicy ?? ''} onChange={e => update({ webrtcPolicy: e.target.value || undefined })} options={WEBRTC_OPTIONS} />
+          </FormItem>
+          <FormItem label="WebRTC 出口 IP">
+            <Input
+              value={config.webrtcIP ?? ''}
+              onChange={e => update({ webrtcIP: e.target.value || undefined })}
+              placeholder="auto 或 1.2.3.4"
+            />
           </FormItem>
           <FormItem label="Do Not Track">
             <Select
@@ -438,4 +583,53 @@ export function FingerprintPanel({ value, onChange }: FingerprintPanelProps) {
       </div>
     </div>
   )
+}
+
+function syncQuickControlsFromConfig(
+  config: FingerprintConfig,
+  setPlatform: (value: string) => void,
+  setCountry: (value: string) => void,
+) {
+  if (config.platform && ['windows', 'mac', 'linux'].includes(config.platform)) {
+    setPlatform(config.platform)
+  }
+  const country = countryFromLocaleTimezone(config.fingerprintLocale || config.lang, config.fingerprintTimezone || config.timezone)
+  if (country) {
+    setCountry(country)
+  }
+}
+
+function countryFromLocaleTimezone(locale?: string, timezone?: string): string {
+  const value = `${locale || ''}|${timezone || ''}`.toLowerCase()
+  if (value.includes('en-us') || value.includes('america/new_york') || value.includes('america/los_angeles')) return 'US'
+  if (value.includes('en-gb') || value.includes('europe/london')) return 'GB'
+  if (value.includes('de-de') || value.includes('europe/berlin')) return 'DE'
+  if (value.includes('fr-fr') || value.includes('europe/paris')) return 'FR'
+  if (value.includes('ja-jp') || value.includes('asia/tokyo')) return 'JP'
+  if (value.includes('ko-kr') || value.includes('asia/seoul')) return 'KR'
+  if (value.includes('en-sg') || value.includes('asia/singapore')) return 'SG'
+  if (value.includes('zh-cn') || value.includes('asia/shanghai')) return 'CN'
+  return ''
+}
+
+function regionForCountry(country: string) {
+  switch (country) {
+    case 'US':
+      return { locale: 'en-US', timezone: 'America/New_York' }
+    case 'GB':
+      return { locale: 'en-GB', timezone: 'Europe/London' }
+    case 'DE':
+      return { locale: 'de-DE', timezone: 'Europe/Berlin' }
+    case 'FR':
+      return { locale: 'fr-FR', timezone: 'Europe/Paris' }
+    case 'JP':
+      return { locale: 'ja-JP', timezone: 'Asia/Tokyo' }
+    case 'KR':
+      return { locale: 'ko-KR', timezone: 'Asia/Seoul' }
+    case 'SG':
+      return { locale: 'en-SG', timezone: 'Asia/Singapore' }
+    case 'CN':
+    default:
+      return { locale: 'zh-CN', timezone: 'Asia/Shanghai' }
+  }
 }

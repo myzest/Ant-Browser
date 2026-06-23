@@ -429,6 +429,8 @@ func TestSanitizeManagedLaunchArgsRemovesSystemManagedFlags(t *testing.T) {
 		"--user-data-dir", "D:\\profiles\\demo",
 		"--proxy-server", "http://127.0.0.1:9000",
 		"--remote-debugging-pipe",
+		"--enable-automation",
+		"--enable-unsafe-swiftshader",
 		"https://example.com",
 	})
 
@@ -442,6 +444,8 @@ func TestSanitizeManagedLaunchArgsRemovesSystemManagedFlags(t *testing.T) {
 		"--user-data-dir",
 		"--proxy-server",
 		"--remote-debugging-pipe",
+		"--enable-automation",
+		"--enable-unsafe-swiftshader",
 	}
 	if !reflect.DeepEqual(removed, wantRemoved) {
 		t.Fatalf("sanitizeManagedLaunchArgs removed mismatch: got=%v want=%v", removed, wantRemoved)
@@ -458,6 +462,121 @@ func TestSanitizeManagedLaunchArgsKeepsUnmanagedFlags(t *testing.T) {
 	}
 	if len(removed) != 0 {
 		t.Fatalf("sanitizeManagedLaunchArgs should not report managed args, got=%v", removed)
+	}
+}
+
+func TestMergeLaunchArgsDeduplicatesSingleValueFingerprintFlags(t *testing.T) {
+	t.Parallel()
+
+	got := mergeLaunchArgs(
+		[]string{"--fingerprint=111", "--fingerprint-platform=windows", "--lang=en-US", "--disable-sync"},
+		[]string{"--fingerprint-platform=mac", "--window-size=1280,800"},
+		[]string{"--lang=ja-JP", "--fingerprint-webrtc-ip=1.2.3.4", "--window-size=1440,900"},
+	)
+	want := []string{
+		"--fingerprint=111",
+		"--fingerprint-platform=mac",
+		"--lang=ja-JP",
+		"--disable-sync",
+		"--window-size=1440,900",
+		"--fingerprint-webrtc-ip=1.2.3.4",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mergeLaunchArgs mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func TestMergeLaunchArgsNormalizesSeparatedSingleValueFlags(t *testing.T) {
+	t.Parallel()
+
+	got := mergeLaunchArgs(
+		[]string{"--lang", "en-US", "--fingerprint-platform", "windows", "--disable-sync"},
+		[]string{"--lang=ja-JP", "--fingerprint-platform=mac"},
+	)
+	want := []string{
+		"--lang=ja-JP",
+		"--fingerprint-platform=mac",
+		"--disable-sync",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mergeLaunchArgs separated value mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func TestEnsureDefaultFingerprintNetworkArgsAddsWebRTCForProxy(t *testing.T) {
+	t.Parallel()
+
+	got := ensureDefaultFingerprintNetworkArgs([]string{"--fingerprint=111"}, "http://127.0.0.1:8080")
+	want := []string{
+		"--fingerprint=111",
+		"--webrtc-ip-handling-policy=disable_non_proxied_udp",
+		"--fingerprint-webrtc-ip=auto",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ensureDefaultFingerprintNetworkArgs mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func TestEnsureDefaultFingerprintNetworkArgsDoesNotAddAutoForDirectProxy(t *testing.T) {
+	t.Parallel()
+
+	got := ensureDefaultFingerprintNetworkArgs([]string{"--fingerprint=111"}, "direct://")
+	want := []string{
+		"--fingerprint=111",
+		"--webrtc-ip-handling-policy=disable_non_proxied_udp",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ensureDefaultFingerprintNetworkArgs direct mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func TestEnsureDefaultFingerprintNetworkArgsKeepsExplicitWebRTCIP(t *testing.T) {
+	t.Parallel()
+
+	got := ensureDefaultFingerprintNetworkArgs([]string{"--fingerprint-webrtc-ip=1.2.3.4", "--webrtc-ip-handling-policy=default_public_interface_only"}, "http://127.0.0.1:8080")
+	want := []string{"--fingerprint-webrtc-ip=1.2.3.4", "--webrtc-ip-handling-policy=default_public_interface_only"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("ensureDefaultFingerprintNetworkArgs explicit mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func TestRedactLaunchArgsForLogMasksProxyCredentials(t *testing.T) {
+	t.Parallel()
+
+	got := redactLaunchArgsForLog([]string{
+		"--disable-sync",
+		"--proxy-server=http://user:secret@example.com:8080",
+		"--lang=zh-CN",
+	})
+	if strings.Contains(got, "secret") {
+		t.Fatalf("redactLaunchArgsForLog leaked proxy credentials: %q", got)
+	}
+	if !strings.Contains(got, "--proxy-server=http://user:%2A%2A%2A@example.com:8080") {
+		t.Fatalf("redactLaunchArgsForLog did not include redacted proxy: %q", got)
+	}
+}
+
+func TestResolveAutoWebRTCIPLaunchArgRemovesAutoForDirectProxy(t *testing.T) {
+	t.Parallel()
+
+	app := NewApp("")
+	args := []string{"--fingerprint=111", "--fingerprint-webrtc-ip=auto", "--lang=zh-CN"}
+	got := app.resolveAutoWebRTCIPLaunchArg("profile-direct", args, "direct://")
+	want := []string{"--fingerprint=111", "--lang=zh-CN"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveAutoWebRTCIPLaunchArg direct mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func TestResolveAutoWebRTCIPLaunchArgRemovesAutoOnResolutionFailure(t *testing.T) {
+	t.Parallel()
+
+	app := NewApp("")
+	args := []string{"--fingerprint=111", "--fingerprint-webrtc-ip=auto", "--lang=zh-CN"}
+	got := app.resolveAutoWebRTCIPLaunchArg("profile-proxy", args, "http://127.0.0.1:1")
+	want := []string{"--fingerprint=111", "--lang=zh-CN"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("resolveAutoWebRTCIPLaunchArg failure mismatch:\n got=%v\nwant=%v", got, want)
 	}
 }
 
@@ -480,12 +599,15 @@ func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *tes
 	}
 	input := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, "runtime-proxy", "")
 
-	effectiveProxy, bridgeKey, releaseBridge, err := app.resolveBrowserStartProxy(input, profile)
+	effectiveProxy, exitIPCacheKey, bridgeKey, releaseBridge, err := app.resolveBrowserStartProxy(input, profile)
 	if err != nil {
 		t.Fatalf("resolveBrowserStartProxy returned error: %v", err)
 	}
 	if effectiveProxy != "http://127.0.0.1:28080" {
 		t.Fatalf("expected temporary proxy, got %q", effectiveProxy)
+	}
+	if exitIPCacheKey != "runtime-proxy|http://127.0.0.1:28080" {
+		t.Fatalf("expected cache key to include temporary proxy identity, got %q", exitIPCacheKey)
 	}
 	if bridgeKey != "" || releaseBridge {
 		t.Fatalf("plain HTTP proxy should not acquire bridge: key=%q release=%v", bridgeKey, releaseBridge)
@@ -495,12 +617,15 @@ func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *tes
 	}
 
 	fallbackInput := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, "missing-proxy", "http://127.0.0.1:38080")
-	effectiveProxy, bridgeKey, releaseBridge, err = app.resolveBrowserStartProxy(fallbackInput, profile)
+	effectiveProxy, exitIPCacheKey, bridgeKey, releaseBridge, err = app.resolveBrowserStartProxy(fallbackInput, profile)
 	if err != nil {
 		t.Fatalf("fallback temporary proxy returned error: %v", err)
 	}
 	if effectiveProxy != "http://127.0.0.1:38080" {
 		t.Fatalf("expected fallback temporary proxy config, got %q", effectiveProxy)
+	}
+	if exitIPCacheKey != "http://127.0.0.1:38080" {
+		t.Fatalf("expected fallback cache key to use explicit proxy config, got %q", exitIPCacheKey)
 	}
 	if bridgeKey != "" || releaseBridge {
 		t.Fatalf("fallback HTTP proxy should not acquire bridge: key=%q release=%v", bridgeKey, releaseBridge)

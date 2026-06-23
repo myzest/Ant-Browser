@@ -40,6 +40,58 @@ export interface BrowserProfileInput {
   groupId?: string
 }
 
+export interface FingerprintHealthIssue {
+  code: string
+  severity: 'green' | 'yellow' | 'red' | string
+  field: string
+  message: string
+}
+
+export interface FingerprintHealthReport {
+  status: 'green' | 'yellow' | 'red' | string
+  issues: FingerprintHealthIssue[]
+}
+
+export interface FingerprintSummary {
+  profileId: string
+  platform: string
+  brand: string
+  locale: string
+  timezone: string
+  resolution: string
+  webglVendor: string
+  webglRenderer: string
+  hardwareConcurrency: number
+  deviceMemory: number
+  touchPoints: number
+}
+
+export interface FingerprintGenerateRequest {
+  currentArgs: string[]
+  profileId?: string
+  platform?: string
+  regionMode?: 'proxy' | 'manual' | 'system' | string
+  country?: string
+  locale?: string
+  timezone?: string
+  deviceClass?: string
+  preserveUnknownArgs?: boolean
+  regenerateSeed?: boolean
+}
+
+export interface FingerprintGenerateResult {
+  args: string[]
+  warnings: FingerprintHealthIssue[]
+  health: FingerprintHealthReport
+  summary: FingerprintSummary
+}
+
+export interface FingerprintValidateRequest {
+  args: string[]
+  proxyId?: string
+  proxyConfig?: string
+}
+
 export interface BrowserTab {
   tabId: string
   title: string

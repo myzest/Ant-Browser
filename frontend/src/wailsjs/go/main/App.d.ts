@@ -177,6 +177,8 @@ export function ForceQuit():Promise<void>;
 
 export function GenerateCDKeys(arg1:number):Promise<Array<string>>;
 
+export function GenerateFingerprintProfile(arg1:any):Promise<any>;
+
 export function GetAppConfig():Promise<Record<string, any>>;
 
 export function GetAppLogs():Promise<Array<logger.MemoryLogEntry>>;
@@ -250,6 +252,8 @@ export function TestProxyRealConnectivity(arg1:string):Promise<backend.ProxyTest
 export function TriggerGC():Promise<void>;
 
 export function UpdateGroup(arg1:string,arg2:browser.GroupInput):Promise<browser.Group>;
+
+export function ValidateFingerprintProfile(arg1:any):Promise<any>;
 
 export function ValidateProxyConfig(arg1:string,arg2:string):Promise<backend.ProxyValidationResult>;
 

@@ -21,6 +21,8 @@ export interface FingerprintConfig {
   platform?: string        // --fingerprint-platform=
   lang?: string            // --lang=
   timezone?: string        // --timezone=
+  fingerprintLocale?: string   // --fingerprint-locale=
+  fingerprintTimezone?: string // --fingerprint-timezone=
 
   // 屏幕与窗口
   resolution?: string      // --window-size=（预设值或 'custom'）
@@ -42,6 +44,7 @@ export interface FingerprintConfig {
 
   // 网络与隐私
   webrtcPolicy?: string         // --webrtc-ip-handling-policy=
+  webrtcIP?: string             // --fingerprint-webrtc-ip=
   doNotTrack?: boolean          // --fingerprint-do-not-track=
 
   // 媒体设备
@@ -62,6 +65,8 @@ export const KEY_MAP: Record<string, keyof FingerprintConfig> = {
   '--fingerprint-platform': 'platform',
   '--lang': 'lang',
   '--timezone': 'timezone',
+  '--fingerprint-locale': 'fingerprintLocale',
+  '--fingerprint-timezone': 'fingerprintTimezone',
   '--window-size': 'resolution',
   '--fingerprint-color-depth': 'colorDepth',
   '--fingerprint-hardware-concurrency': 'hardwareConcurrency',
@@ -72,6 +77,7 @@ export const KEY_MAP: Record<string, keyof FingerprintConfig> = {
   '--fingerprint-audio-noise': 'audioNoise',
   '--fingerprint-fonts': 'fonts',
   '--webrtc-ip-handling-policy': 'webrtcPolicy',
+  '--fingerprint-webrtc-ip': 'webrtcIP',
   '--fingerprint-do-not-track': 'doNotTrack',
   '--fingerprint-media-devices': 'mediaDevices',
   '--fingerprint-touch-points': 'touchPoints',
@@ -83,11 +89,16 @@ export function serialize(config: FingerprintConfig): string[] {
   if (config.seed) args.push(`--fingerprint=${config.seed}`)
   if (config.brand) args.push(`--fingerprint-brand=${config.brand}`)
   if (config.platform) args.push(`--fingerprint-platform=${config.platform}`)
+  const locale = config.fingerprintLocale || config.lang
   if (config.lang) args.push(`--lang=${config.lang}`)
+  if (locale) args.push(`--fingerprint-locale=${locale}`)
   if (config.timezone) {
     // 如果是 system，替换为实际系统时区
     const tz = config.timezone === 'system' ? getSystemTimezone() : config.timezone
     args.push(`--timezone=${tz}`)
+    args.push(`--fingerprint-timezone=${config.fingerprintTimezone || tz}`)
+  } else if (config.fingerprintTimezone) {
+    args.push(`--fingerprint-timezone=${config.fingerprintTimezone}`)
   }
 
   const res = config.resolution === 'custom' ? config.customResolution : config.resolution
@@ -105,6 +116,7 @@ export function serialize(config: FingerprintConfig): string[] {
   if (config.fonts) args.push(`--fingerprint-fonts=${config.fonts}`)
 
   if (config.webrtcPolicy) args.push(`--webrtc-ip-handling-policy=${config.webrtcPolicy}`)
+  if (config.webrtcIP) args.push(`--fingerprint-webrtc-ip=${config.webrtcIP}`)
   if (config.doNotTrack !== undefined) args.push(`--fingerprint-do-not-track=${config.doNotTrack}`)
   if (config.mediaDevices) args.push(`--fingerprint-media-devices=${config.mediaDevices}`)
   if (config.touchPoints) args.push(`--fingerprint-touch-points=${config.touchPoints}`)
@@ -182,6 +194,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       webglRenderer: 'Intel(R) UHD Graphics 630',
       fonts: 'Arial,Microsoft YaHei,SimSun,SimHei,Helvetica,Times New Roman',
       webrtcPolicy: 'disable_non_proxied_udp',
+      webrtcIP: 'auto',
       doNotTrack: false,
       touchPoints: '0',
     },
@@ -205,6 +218,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       webglRenderer: 'NVIDIA GeForce RTX 3080',
       fonts: 'Arial,Helvetica,Times New Roman,Courier New,Verdana',
       webrtcPolicy: 'disable_non_proxied_udp',
+      webrtcIP: 'auto',
       doNotTrack: false,
       touchPoints: '0',
     },
@@ -228,6 +242,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       webglRenderer: 'Apple M2',
       fonts: 'Arial,Helvetica,PingFang SC,Hiragino Sans GB,STHeiti,Times New Roman',
       webrtcPolicy: 'disable_non_proxied_udp',
+      webrtcIP: 'auto',
       doNotTrack: true,
       touchPoints: '0',
     },
@@ -251,6 +266,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       webglRenderer: 'Intel(R) HD Graphics 520',
       fonts: 'Arial,Microsoft YaHei,Calibri,Segoe UI,Times New Roman',
       webrtcPolicy: 'default_public_interface_only',
+      webrtcIP: 'auto',
       doNotTrack: false,
       touchPoints: '0',
     },
@@ -274,6 +290,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       webglRenderer: 'AMD Radeon RX 6600',
       fonts: 'Arial,Helvetica,Times New Roman,Courier New,Georgia',
       webrtcPolicy: 'disable_non_proxied_udp',
+      webrtcIP: 'auto',
       doNotTrack: false,
       touchPoints: '0',
     },
@@ -297,6 +314,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       webglRenderer: 'Apple M1',
       fonts: 'Arial,Helvetica,Hiragino Kaku Gothic ProN,Yu Gothic,Times New Roman',
       webrtcPolicy: 'disable_non_proxied_udp',
+      webrtcIP: 'auto',
       doNotTrack: true,
       touchPoints: '0',
     },
@@ -320,6 +338,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       webglRenderer: 'Intel(R) UHD Graphics 630',
       fonts: 'Arial,Helvetica,Times New Roman,Courier New,Verdana',
       webrtcPolicy: 'disable_non_proxied_udp',
+      webrtcIP: 'auto',
       doNotTrack: false,
       touchPoints: '0',
     },
@@ -343,6 +362,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       webglRenderer: 'Apple M1',
       fonts: 'Arial,Helvetica,Times New Roman,Courier New,Georgia',
       webrtcPolicy: 'disable_non_proxied_udp',
+      webrtcIP: 'auto',
       doNotTrack: false,
       touchPoints: '0',
     },

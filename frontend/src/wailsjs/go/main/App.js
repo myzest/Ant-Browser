@@ -338,6 +338,10 @@ export function GenerateCDKeys(arg1) {
   return window['go']['main']['App']['GenerateCDKeys'](arg1);
 }
 
+export function GenerateFingerprintProfile(arg1) {
+  return window['go']['main']['App']['GenerateFingerprintProfile'](arg1);
+}
+
 export function GetAppConfig() {
   return window['go']['main']['App']['GetAppConfig']();
 }
@@ -484,6 +488,10 @@ export function TriggerGC() {
 
 export function UpdateGroup(arg1, arg2) {
   return window['go']['main']['App']['UpdateGroup'](arg1, arg2);
+}
+
+export function ValidateFingerprintProfile(arg1) {
+  return window['go']['main']['App']['ValidateFingerprintProfile'](arg1);
 }
 
 export function ValidateProxyConfig(arg1, arg2) {

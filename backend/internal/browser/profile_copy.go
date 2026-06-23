@@ -9,7 +9,7 @@ import (
 	"github.com/google/uuid"
 )
 
-// Copy 复制实例配置（除指纹参数外全部复制，指纹使用默认值生成新种子）
+// Copy 复制实例配置（保留源指纹语义，启动时按新 profile 生成独立种子）
 func (m *Manager) Copy(profileId string, newName string) (*Profile, error) {
 	log := logger.New("Browser")
 	m.InitData()
@@ -40,7 +40,7 @@ func (m *Manager) Copy(profileId string, newName string) (*Profile, error) {
 		ProfileName:        profileName,
 		UserDataDir:        newId,
 		CoreId:             normalizeProfileCoreID(src.CoreId),
-		FingerprintArgs:    append([]string{}, m.Config.Browser.DefaultFingerprintArgs...),
+		FingerprintArgs:    m.defaultFingerprintArgsForProfile(newId, nil, src.FingerprintArgs, platformFromFingerprintArgs(src.FingerprintArgs)),
 		ProxyId:            src.ProxyId,
 		ProxyConfig:        src.ProxyConfig,
 		ProxyBindSourceID:  src.ProxyBindSourceID,

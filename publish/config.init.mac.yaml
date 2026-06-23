@@ -41,6 +41,23 @@ browser:
   default_fingerprint_args:
     - --fingerprint-brand=Chrome
     - --fingerprint-platform=mac
+    - --lang=zh-CN
+    - --fingerprint-locale=zh-CN
+    - --timezone=Asia/Shanghai
+    - --fingerprint-timezone=Asia/Shanghai
+    - --window-size=1440,900
+    - --fingerprint-color-depth=24
+    - --fingerprint-hardware-concurrency=8
+    - --fingerprint-device-memory=8
+    - --fingerprint-canvas-noise=true
+    - --fingerprint-audio-noise=true
+    - --fingerprint-webgl-vendor=Apple
+    - --fingerprint-webgl-renderer=Apple M1
+    - --fingerprint-fonts=Arial,Helvetica,PingFang SC,Hiragino Sans GB,STHeiti,Times New Roman
+    - --webrtc-ip-handling-policy=disable_non_proxied_udp
+    - --fingerprint-webrtc-ip=auto
+    - --fingerprint-do-not-track=false
+    - --fingerprint-touch-points=0
   default_launch_args:
     - --disable-sync
     - --no-first-run

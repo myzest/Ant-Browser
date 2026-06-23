@@ -3,6 +3,7 @@ package backend
 import (
 	"ant-chrome/backend/internal/browser"
 	"ant-chrome/backend/internal/logger"
+	"ant-chrome/backend/internal/proxy"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,7 @@ type browserStartPlan struct {
 	userDataDir           string
 	args                  []string
 	effectiveProxy        string
+	exitIPCacheKey        string
 	acquiredXrayBridgeKey string
 	releaseXrayBridge     bool
 	assignedDebugPort     int
@@ -118,7 +120,7 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 		return nil, err
 	}
 
-	effectiveProxy, acquiredXrayBridgeKey, releaseXrayBridge, err := a.resolveBrowserStartProxy(input, profile)
+	effectiveProxy, exitIPCacheKey, acquiredXrayBridgeKey, releaseXrayBridge, err := a.resolveBrowserStartProxy(input, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -139,12 +141,16 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 		return nil, startErr
 	}
 
+	launchArgs := buildBrowserLaunchArgs(profile, userDataDir, assignedDebugPort, effectiveProxy, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, input.StartURLs, a.browserDefaultStartURLs(), input.SkipDefaultStartURLs, browserRestoreLastSession(a.config))
+	launchArgs = a.resolveAutoWebRTCIPLaunchArgWithCacheKey(input.ProfileID, launchArgs, effectiveProxy, exitIPCacheKey)
+
 	return &browserStartPlan{
 		profile:               profile,
 		chromeBinaryPath:      chromeBinaryPath,
 		userDataDir:           userDataDir,
-		args:                  buildBrowserLaunchArgs(profile, userDataDir, assignedDebugPort, effectiveProxy, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, input.StartURLs, a.browserDefaultStartURLs(), input.SkipDefaultStartURLs, browserRestoreLastSession(a.config)),
+		args:                  launchArgs,
 		effectiveProxy:        effectiveProxy,
+		exitIPCacheKey:        exitIPCacheKey,
 		acquiredXrayBridgeKey: acquiredXrayBridgeKey,
 		releaseXrayBridge:     releaseXrayBridge,
 		assignedDebugPort:     assignedDebugPort,
@@ -229,6 +235,7 @@ func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPo
 			break
 		}
 	}
+	autoFingerprintArgs := []string{}
 	if !hasFingerprint {
 		seed := 0
 		for _, char := range profile.ProfileId {
@@ -237,7 +244,7 @@ func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPo
 		if seed < 0 {
 			seed = -seed
 		}
-		args = append(args, fmt.Sprintf("--fingerprint=%d", seed))
+		autoFingerprintArgs = append(autoFingerprintArgs, fmt.Sprintf("--fingerprint=%d", seed))
 	}
 
 	if effectiveProxy == "direct://" {
@@ -246,8 +253,71 @@ func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPo
 		args = append(args, fmt.Sprintf("--proxy-server=%s", effectiveProxy))
 	}
 
-	args = append(args, profile.FingerprintArgs...)
-	args = append(args, sanitizedProfileLaunchArgs...)
-	args = append(args, sanitizedExtraLaunchArgs...)
+	fingerprintArgs := mergeLaunchArgs(autoFingerprintArgs, profile.FingerprintArgs, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs)
+	fingerprintArgs = ensureDefaultFingerprintNetworkArgs(fingerprintArgs, effectiveProxy)
+	args = append(args, fingerprintArgs...)
 	return appendLaunchTargets(args, startURLs, defaultStartURLs, skipDefaultStartURLs, restoreLastSession)
+}
+
+func (a *App) resolveAutoWebRTCIPLaunchArg(profileID string, args []string, effectiveProxy string) []string {
+	return a.resolveAutoWebRTCIPLaunchArgWithCacheKey(profileID, args, effectiveProxy, "")
+}
+
+func (a *App) resolveAutoWebRTCIPLaunchArgWithCacheKey(profileID string, args []string, effectiveProxy string, cacheKey string) []string {
+	index := -1
+	for i, arg := range args {
+		key, ok := singleValueLaunchArgKey(arg)
+		if ok && key == "--fingerprint-webrtc-ip" && strings.EqualFold(strings.TrimSpace(launchArgValue(arg)), "auto") {
+			index = i
+			break
+		}
+	}
+	if index < 0 {
+		return args
+	}
+
+	log := logger.New("Browser")
+	if !shouldResolveFingerprintWebRTCIP(effectiveProxy) {
+		log.Warn("WebRTC 出口 IP 自动解析已跳过：当前为直连",
+			logger.F("profile_id", profileID),
+		)
+		return removeLaunchArgAt(args, index)
+	}
+
+	ip, err := proxy.ResolveExitIPWithCacheKey(effectiveProxy, cacheKey, 5*time.Second)
+	if err != nil || strings.TrimSpace(ip) == "" {
+		if err != nil {
+			log.Warn("WebRTC 出口 IP 自动解析失败，已移除 auto 参数",
+				logger.F("profile_id", profileID),
+				logger.F("proxy", proxy.RedactProxyURL(effectiveProxy)),
+				logger.F("error", err.Error()),
+			)
+		}
+		return removeLaunchArgAt(args, index)
+	}
+
+	args[index] = "--fingerprint-webrtc-ip=" + strings.TrimSpace(ip)
+	log.Info("WebRTC 出口 IP 自动解析成功",
+		logger.F("profile_id", profileID),
+		logger.F("ip", ip),
+	)
+	return args
+}
+
+func launchArgValue(arg string) string {
+	_, value, ok := strings.Cut(strings.TrimSpace(arg), "=")
+	if !ok {
+		return ""
+	}
+	return value
+}
+
+func removeLaunchArgAt(args []string, index int) []string {
+	if index < 0 || index >= len(args) {
+		return args
+	}
+	out := make([]string, 0, len(args)-1)
+	out = append(out, args[:index]...)
+	out = append(out, args[index+1:]...)
+	return out
 }

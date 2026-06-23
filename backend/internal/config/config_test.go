@@ -1,9 +1,11 @@
 package config
 
 import (
+	"ant-chrome/backend/internal/fingerprint"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 )
 
@@ -108,22 +110,64 @@ browser: {}
 func TestDefaultFingerprintArgsForOS(t *testing.T) {
 	t.Parallel()
 
-	tests := map[string]string{
-		"windows": "--fingerprint-platform=windows",
-		"linux":   "--fingerprint-platform=linux",
-		"darwin":  "--fingerprint-platform=mac",
-		"freebsd": "--fingerprint-platform=windows",
+	tests := map[string]struct {
+		platform string
+	}{
+		"windows": {platform: "--fingerprint-platform=windows"},
+		"linux":   {platform: "--fingerprint-platform=linux"},
+		"darwin":  {platform: "--fingerprint-platform=mac"},
+		"freebsd": {platform: "--fingerprint-platform=windows"},
 	}
 
 	for goos, want := range tests {
 		got := defaultFingerprintArgsForOS(goos)
-		if len(got) != 2 {
-			t.Fatalf("%s: unexpected args length: got=%v", goos, got)
+		if !stringSliceContains(got, "--fingerprint-brand=Chrome") {
+			t.Fatalf("%s: missing brand arg: got=%v", goos, got)
 		}
-		if got[1] != want {
-			t.Fatalf("%s: platform arg mismatch: got=%q want=%q", goos, got[1], want)
+		if !stringSliceContains(got, want.platform) {
+			t.Fatalf("%s: platform arg mismatch: got=%v want contains %q", goos, got, want.platform)
+		}
+		required := []string{
+			"--lang=zh-CN",
+			"--fingerprint-locale=zh-CN",
+			"--timezone=Asia/Shanghai",
+			"--fingerprint-timezone=Asia/Shanghai",
+			"--fingerprint-canvas-noise=true",
+			"--fingerprint-audio-noise=true",
+			"--webrtc-ip-handling-policy=disable_non_proxied_udp",
+			"--fingerprint-webrtc-ip=auto",
+			"--fingerprint-touch-points=0",
+		}
+		for _, arg := range required {
+			if !stringSliceContains(got, arg) {
+				t.Fatalf("%s: missing default fingerprint arg %q in %v", goos, arg, got)
+			}
+		}
+		if !hasArgPrefix(got, "--fingerprint-webgl-renderer=") {
+			t.Fatalf("%s: missing WebGL renderer in %v", goos, got)
+		}
+		if health := fingerprint.Health(got); health.Status != "green" {
+			t.Fatalf("%s: default fingerprint should be healthy, got %#v", goos, health)
 		}
 	}
+}
+
+func stringSliceContains(items []string, want string) bool {
+	for _, item := range items {
+		if item == want {
+			return true
+		}
+	}
+	return false
+}
+
+func hasArgPrefix(items []string, prefix string) bool {
+	for _, item := range items {
+		if strings.HasPrefix(item, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func TestDefaultConfigUsesCurrentOSFingerprintPlatform(t *testing.T) {
