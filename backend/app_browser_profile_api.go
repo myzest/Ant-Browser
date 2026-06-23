@@ -147,10 +147,9 @@ func (a *App) migrateToSQLite() {
 		if len(src) == 0 {
 			src = []config.BrowserBookmark{
 				{Name: "Google", URL: "https://www.google.com/"},
+				{Name: "Fingerprint", URL: "https://demo.fingerprint.com/playground"},
 				{Name: "Gmail", URL: "https://mail.google.com/"},
-				{Name: "Claude", URL: "https://claude.ai/"},
 				{Name: "ChatGPT", URL: "https://chatgpt.com/"},
-				{Name: "YouTube", URL: "https://www.youtube.com/"},
 			}
 		}
 		if err := a.browserMgr.BookmarkDAO.ReplaceAll(src); err != nil {

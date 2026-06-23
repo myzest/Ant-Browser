@@ -8,10 +8,9 @@ export async function fetchBookmarks(): Promise<BrowserBookmark[]> {
   }
   return [
     { name: 'Google', url: 'https://www.google.com/', openOnStart: false },
+    { name: 'Fingerprint', url: 'https://demo.fingerprint.com/playground', openOnStart: false },
     { name: 'Gmail', url: 'https://mail.google.com/', openOnStart: false },
-    { name: 'Claude', url: 'https://claude.ai/', openOnStart: false },
     { name: 'ChatGPT', url: 'https://chatgpt.com/', openOnStart: false },
-    { name: 'YouTube', url: 'https://www.youtube.com/', openOnStart: false },
     { name: 'IPPure', url: 'https://ippure.com/', openOnStart: false },
     { name: 'IPLark', url: 'https://iplark.com/', openOnStart: false },
     { name: 'Ping0', url: 'https://ping0.cc/', openOnStart: false },

@@ -20,10 +20,9 @@ type BookmarkSyncResult struct {
 
 var defaultBookmarkList = []BrowserBookmark{
 	{Name: "Google", URL: "https://www.google.com/"},
+	{Name: "Fingerprint", URL: "https://demo.fingerprint.com/playground"},
 	{Name: "Gmail", URL: "https://mail.google.com/"},
-	{Name: "Claude", URL: "https://claude.ai/"},
 	{Name: "ChatGPT", URL: "https://chatgpt.com/"},
-	{Name: "YouTube", URL: "https://www.youtube.com/"},
 	{Name: "IPPure", URL: "https://ippure.com/"},
 	{Name: "IPLark", URL: "https://iplark.com/"},
 	{Name: "Ping0", URL: "https://ping0.cc/"},
