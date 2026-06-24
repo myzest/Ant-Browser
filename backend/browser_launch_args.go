@@ -29,9 +29,11 @@ var singleValueLaunchArgPrefixes = []string{
 	"--fingerprint-color-depth",
 	"--fingerprint-device-memory",
 	"--fingerprint-device-pixel-ratio",
+	"--fingerprint-do-not-track",
 	"--fingerprint-fonts",
 	"--fingerprint-hardware-concurrency",
 	"--fingerprint-locale",
+	"--fingerprint-accept-language",
 	"--fingerprint-media-devices",
 	"--fingerprint-platform",
 	"--fingerprint-screen-avail",
@@ -44,6 +46,10 @@ var singleValueLaunchArgPrefixes = []string{
 	"--timezone",
 	"--webrtc-ip-handling-policy",
 	"--window-size",
+}
+
+var singleValueLaunchArgAliases = map[string]string{
+	"--accept-language": "--fingerprint-accept-language",
 }
 
 func sanitizeManagedLaunchArgs(args []string) ([]string, []string) {
@@ -103,7 +109,10 @@ func mergeLaunchArgs(groups ...[]string) []string {
 			}
 			key, ok := singleValueLaunchArgKey(arg)
 			if ok {
-				if !strings.Contains(arg, "=") && i+1 < len(group) {
+				if argKey, value, hasValue := strings.Cut(arg, "="); hasValue {
+					_ = argKey
+					arg = key + "=" + strings.TrimSpace(value)
+				} else if i+1 < len(group) {
 					next := strings.TrimSpace(group[i+1])
 					if next != "" && !strings.HasPrefix(next, "-") {
 						arg = key + "=" + next
@@ -128,6 +137,9 @@ func singleValueLaunchArgKey(arg string) (string, bool) {
 		key = arg[:eq]
 	}
 	key = strings.ToLower(strings.TrimSpace(key))
+	if canonical, ok := singleValueLaunchArgAliases[key]; ok {
+		return canonical, true
+	}
 	for _, prefix := range singleValueLaunchArgPrefixes {
 		if key == prefix {
 			return key, true
@@ -149,6 +161,9 @@ func ensureDefaultFingerprintNetworkArgs(args []string, effectiveProxy string) [
 
 func hasLaunchArgKey(args []string, want string) bool {
 	want = strings.ToLower(strings.TrimSpace(want))
+	if canonical, ok := singleValueLaunchArgKey(want); ok {
+		want = canonical
+	}
 	for _, arg := range args {
 		key, ok := singleValueLaunchArgKey(arg)
 		if ok && key == want {

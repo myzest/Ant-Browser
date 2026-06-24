@@ -38,20 +38,23 @@ type GenerateOptions struct {
 }
 
 type Profile struct {
-	ID          string
-	Weight      int
-	Platform    string
-	Brand       string
-	Country     string
-	Locale      string
-	Timezone    string
-	Screen      Screen
-	Hardware    Hardware
-	WebGL       WebGL
-	Fonts       []string
-	Media       MediaDevices
-	Privacy     Privacy
-	DeviceClass string
+	ID             string
+	Weight         int
+	Platform       string
+	Brand          string
+	Country        string
+	Locale         string
+	Timezone       string
+	AcceptLanguage string
+	Languages      []string
+	Screen         Screen
+	Hardware       Hardware
+	WebGL          WebGL
+	Fonts          []string
+	Media          MediaDevices
+	Privacy        Privacy
+	ClientHints    ClientHints
+	DeviceClass    string
 }
 
 type Screen struct {
@@ -90,6 +93,26 @@ type Privacy struct {
 	AudioNoise   bool
 }
 
+// ClientHints is data-only for now. Ant-Browser does not emit UA-CH launch
+// flags until the active Chromium core exposes a verified native capability.
+type ClientHints struct {
+	RuntimeCoverage string            `json:"runtimeCoverage"`
+	Brands          []ClientHintBrand `json:"brands"`
+	FullVersionList []ClientHintBrand `json:"fullVersionList"`
+	Platform        string            `json:"platform"`
+	PlatformVersion string            `json:"platformVersion"`
+	Architecture    string            `json:"architecture"`
+	Bitness         string            `json:"bitness"`
+	Mobile          bool              `json:"mobile"`
+	Model           string            `json:"model"`
+	Notes           []string          `json:"notes,omitempty"`
+}
+
+type ClientHintBrand struct {
+	Brand   string `json:"brand"`
+	Version string `json:"version"`
+}
+
 type ValidationIssue struct {
 	Code     string `json:"code"`
 	Severity string `json:"severity"`
@@ -103,35 +126,41 @@ type HealthReport struct {
 }
 
 type Summary struct {
-	ProfileID           string `json:"profileId"`
-	Platform            string `json:"platform"`
-	Brand               string `json:"brand"`
-	Locale              string `json:"locale"`
-	Timezone            string `json:"timezone"`
-	Resolution          string `json:"resolution"`
-	WebGLVendor         string `json:"webglVendor"`
-	WebGLRenderer       string `json:"webglRenderer"`
-	HardwareConcurrency int    `json:"hardwareConcurrency"`
-	DeviceMemory        int    `json:"deviceMemory"`
-	TouchPoints         int    `json:"touchPoints"`
-	RegionMode          string `json:"regionMode,omitempty"`
-	Country             string `json:"country,omitempty"`
+	ProfileID           string   `json:"profileId"`
+	Platform            string   `json:"platform"`
+	Brand               string   `json:"brand"`
+	Locale              string   `json:"locale"`
+	Timezone            string   `json:"timezone"`
+	AcceptLanguage      string   `json:"acceptLanguage,omitempty"`
+	Languages           []string `json:"languages,omitempty"`
+	Resolution          string   `json:"resolution"`
+	WebGLVendor         string   `json:"webglVendor"`
+	WebGLRenderer       string   `json:"webglRenderer"`
+	HardwareConcurrency int      `json:"hardwareConcurrency"`
+	DeviceMemory        int      `json:"deviceMemory"`
+	TouchPoints         int      `json:"touchPoints"`
+	ClientHintsCoverage string   `json:"clientHintsCoverage,omitempty"`
+	RegionMode          string   `json:"regionMode,omitempty"`
+	Country             string   `json:"country,omitempty"`
 }
 
 type Library struct {
-	profiles []Profile
-	regions  map[string]Region
-	fonts    map[string]FontPool
-	webgl    map[string][]WebGL
-	screen   ScreenDistribution
-	media    map[string][]MediaDevices
+	profiles    []Profile
+	regions     map[string]Region
+	fonts       map[string]FontPool
+	webgl       map[string][]WebGL
+	screen      ScreenDistribution
+	media       map[string][]MediaDevices
+	clientHints map[string]ClientHints
 }
 
 type Region struct {
-	Country   string   `json:"country"`
-	Name      string   `json:"name"`
-	Locales   []string `json:"locales"`
-	Timezones []string `json:"timezones"`
+	Country        string   `json:"country"`
+	Name           string   `json:"name"`
+	Locales        []string `json:"locales"`
+	Timezones      []string `json:"timezones"`
+	AcceptLanguage string   `json:"acceptLanguage"`
+	Languages      []string `json:"languages"`
 }
 
 type FontPool struct {
@@ -182,7 +211,11 @@ func LoadLibraryFromData() (*Library, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Library{profiles: profiles, regions: regions, fonts: fonts, webgl: webgl, screen: screen, media: media}, nil
+	clientHints, err := loadClientHintsFromData()
+	if err != nil {
+		return nil, err
+	}
+	return &Library{profiles: profiles, regions: regions, fonts: fonts, webgl: webgl, screen: screen, media: media, clientHints: clientHints}, nil
 }
 
 func StableSeed(profileID string) int64 {
@@ -240,6 +273,9 @@ func Generate(lib *Library, opts GenerateOptions) (*Profile, error) {
 	if len(lib.media) == 0 {
 		lib.media = defaultMediaPools()
 	}
+	if len(lib.clientHints) == 0 {
+		lib.clientHints = defaultClientHints()
+	}
 	platform := NormalizePlatform(opts.Platform)
 	regionMode := NormalizeRegionMode(opts.RegionMode)
 	locale, timezone, country := lib.localeTimezone(opts.Country, opts.Locale, opts.Timezone)
@@ -278,6 +314,8 @@ func Generate(lib *Library, opts GenerateOptions) (*Profile, error) {
 	picked.Country = country
 	picked.Locale = locale
 	picked.Timezone = timezone
+	picked.AcceptLanguage, picked.Languages = lib.languageStack(country, locale)
+	picked.ClientHints = pickClientHints(platform, picked.ClientHints, lib.clientHints)
 	applyDistributionData(&picked, lib, seed)
 	if picked.Screen.AvailWidth <= 0 {
 		picked.Screen.AvailWidth = picked.Screen.Width
@@ -317,6 +355,7 @@ func Args(profile *Profile) []string {
 		"--fingerprint-platform=" + NormalizePlatform(profile.Platform),
 		"--lang=" + defaultString(profile.Locale, "zh-CN"),
 		"--fingerprint-locale=" + defaultString(profile.Locale, "zh-CN"),
+		"--fingerprint-accept-language=" + defaultString(profile.AcceptLanguage, buildAcceptLanguage(languagesForLocale(defaultString(profile.Locale, "zh-CN")))),
 		"--timezone=" + defaultString(profile.Timezone, "Asia/Shanghai"),
 		"--fingerprint-timezone=" + defaultString(profile.Timezone, "Asia/Shanghai"),
 		"--window-size=" + strconv.Itoa(profile.Screen.Width) + "," + strconv.Itoa(profile.Screen.Height),
@@ -350,12 +389,15 @@ func SummaryFor(profile *Profile) Summary {
 		Country:             profile.Country,
 		Locale:              profile.Locale,
 		Timezone:            profile.Timezone,
+		AcceptLanguage:      profile.AcceptLanguage,
+		Languages:           append([]string{}, profile.Languages...),
 		Resolution:          strconv.Itoa(profile.Screen.Width) + "," + strconv.Itoa(profile.Screen.Height),
 		WebGLVendor:         profile.WebGL.Vendor,
 		WebGLRenderer:       profile.WebGL.Renderer,
 		HardwareConcurrency: profile.Hardware.HardwareConcurrency,
 		DeviceMemory:        profile.Hardware.DeviceMemory,
 		TouchPoints:         profile.Hardware.TouchPoints,
+		ClientHintsCoverage: profile.ClientHints.RuntimeCoverage,
 	}
 }
 
@@ -474,8 +516,42 @@ func (lib *Library) localeTimezone(country string, locale string, timezone strin
 	return locale, timezone, country
 }
 
+func (lib *Library) languageStack(country string, locale string) (string, []string) {
+	locale = strings.TrimSpace(locale)
+	country = normalizeCountry(country, locale, "")
+	if lib != nil {
+		if region, ok := lib.regions[country]; ok {
+			if locale != "" && !languageTagListContains(region.Locales, locale) {
+				languages := languagesForLocale(locale)
+				return buildAcceptLanguage(languages), languages
+			}
+			acceptLanguage := strings.TrimSpace(region.AcceptLanguage)
+			languages := normalizeLanguageTags(region.Languages)
+			if len(languages) == 0 {
+				languages = normalizeLanguageTags(region.Locales)
+			}
+			if acceptLanguage == "" {
+				acceptLanguage = buildAcceptLanguage(languages)
+			}
+			if acceptLanguage != "" || len(languages) > 0 {
+				return acceptLanguage, languages
+			}
+		}
+	}
+	languages := languagesForLocale(locale)
+	if len(languages) == 0 {
+		languages = []string{"zh-CN", "zh"}
+	}
+	return buildAcceptLanguage(languages), languages
+}
+
 func RegionDefaults(country string, locale string, timezone string) (string, string, string) {
 	return LoadLibrary().localeTimezone(country, locale, timezone)
+}
+
+func AcceptLanguageDefaults(country string, locale string) string {
+	acceptLanguage, _ := LoadLibrary().languageStack(country, locale)
+	return acceptLanguage
 }
 
 func normalizeDeviceClass(value string) string {
@@ -554,10 +630,51 @@ func loadRegionsFromData() (map[string]Region, error) {
 			continue
 		}
 		item.Country = country
+		item.Locales = normalizeLanguageTags(item.Locales)
+		item.Languages = normalizeLanguageTags(item.Languages)
+		if len(item.Languages) == 0 {
+			item.Languages = append([]string{}, item.Locales...)
+		}
+		item.AcceptLanguage = normalizeAcceptLanguage(item.AcceptLanguage, item.Languages)
 		out[country] = item
 	}
 	if len(out) == 0 {
 		return nil, fmt.Errorf("fingerprint locale data is empty")
+	}
+	return out, nil
+}
+
+func loadClientHintsFromData() (map[string]ClientHints, error) {
+	payload, err := fingerprintDataFS.ReadFile("data/client_hints.json")
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]ClientHints
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, err
+	}
+	out := map[string]ClientHints{}
+	for platform, hints := range raw {
+		key := NormalizePlatform(platform)
+		hints.RuntimeCoverage = strings.TrimSpace(hints.RuntimeCoverage)
+		hints.Brands = normalizeClientHintBrands(hints.Brands)
+		hints.FullVersionList = normalizeClientHintBrands(hints.FullVersionList)
+		hints.Platform = strings.TrimSpace(hints.Platform)
+		hints.PlatformVersion = strings.TrimSpace(hints.PlatformVersion)
+		hints.Architecture = strings.TrimSpace(hints.Architecture)
+		hints.Bitness = strings.TrimSpace(hints.Bitness)
+		hints.Model = strings.TrimSpace(hints.Model)
+		hints.Notes = normalizeUniqueStrings(hints.Notes)
+		if hints.RuntimeCoverage == "" {
+			hints.RuntimeCoverage = "data-only"
+		}
+		if len(hints.Brands) == 0 && len(hints.FullVersionList) == 0 {
+			continue
+		}
+		out[key] = hints
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("fingerprint client hints data is empty")
 	}
 	return out, nil
 }
@@ -672,27 +789,58 @@ func loadMediaFromData() (map[string][]MediaDevices, error) {
 
 func defaultLibrary() *Library {
 	return &Library{
-		profiles: defaultProfiles(),
-		regions:  defaultRegions(),
-		fonts:    defaultFontPools(),
-		webgl:    defaultWebGLPools(),
-		screen:   defaultScreenDistribution(),
-		media:    defaultMediaPools(),
+		profiles:    defaultProfiles(),
+		regions:     defaultRegions(),
+		fonts:       defaultFontPools(),
+		webgl:       defaultWebGLPools(),
+		screen:      defaultScreenDistribution(),
+		media:       defaultMediaPools(),
+		clientHints: defaultClientHints(),
 	}
 }
 
 func defaultRegions() map[string]Region {
 	return map[string]Region{
-		"CN": {Country: "CN", Name: "China", Locales: []string{"zh-CN"}, Timezones: []string{"Asia/Shanghai"}},
-		"US": {Country: "US", Name: "United States", Locales: []string{"en-US"}, Timezones: []string{"America/New_York", "America/Los_Angeles", "America/Chicago"}},
-		"GB": {Country: "GB", Name: "United Kingdom", Locales: []string{"en-GB"}, Timezones: []string{"Europe/London"}},
-		"DE": {Country: "DE", Name: "Germany", Locales: []string{"de-DE"}, Timezones: []string{"Europe/Berlin"}},
-		"FR": {Country: "FR", Name: "France", Locales: []string{"fr-FR"}, Timezones: []string{"Europe/Paris"}},
-		"JP": {Country: "JP", Name: "Japan", Locales: []string{"ja-JP"}, Timezones: []string{"Asia/Tokyo"}},
-		"KR": {Country: "KR", Name: "South Korea", Locales: []string{"ko-KR"}, Timezones: []string{"Asia/Seoul"}},
-		"SG": {Country: "SG", Name: "Singapore", Locales: []string{"en-SG"}, Timezones: []string{"Asia/Singapore"}},
-		"BR": {Country: "BR", Name: "Brazil", Locales: []string{"pt-BR"}, Timezones: []string{"America/Sao_Paulo"}},
-		"IN": {Country: "IN", Name: "India", Locales: []string{"en-IN"}, Timezones: []string{"Asia/Kolkata"}},
+		"CN": {Country: "CN", Name: "China", Locales: []string{"zh-CN"}, Timezones: []string{"Asia/Shanghai"}, AcceptLanguage: "zh-CN,zh;q=0.9", Languages: []string{"zh-CN", "zh"}},
+		"US": {Country: "US", Name: "United States", Locales: []string{"en-US"}, Timezones: []string{"America/New_York", "America/Los_Angeles", "America/Chicago"}, AcceptLanguage: "en-US,en;q=0.9", Languages: []string{"en-US", "en"}},
+		"GB": {Country: "GB", Name: "United Kingdom", Locales: []string{"en-GB"}, Timezones: []string{"Europe/London"}, AcceptLanguage: "en-GB,en;q=0.9", Languages: []string{"en-GB", "en"}},
+		"DE": {Country: "DE", Name: "Germany", Locales: []string{"de-DE"}, Timezones: []string{"Europe/Berlin"}, AcceptLanguage: "de-DE,de;q=0.9,en;q=0.8", Languages: []string{"de-DE", "de", "en"}},
+		"FR": {Country: "FR", Name: "France", Locales: []string{"fr-FR"}, Timezones: []string{"Europe/Paris"}, AcceptLanguage: "fr-FR,fr;q=0.9,en;q=0.8", Languages: []string{"fr-FR", "fr", "en"}},
+		"JP": {Country: "JP", Name: "Japan", Locales: []string{"ja-JP"}, Timezones: []string{"Asia/Tokyo"}, AcceptLanguage: "ja-JP,ja;q=0.9,en;q=0.8", Languages: []string{"ja-JP", "ja", "en"}},
+		"KR": {Country: "KR", Name: "South Korea", Locales: []string{"ko-KR"}, Timezones: []string{"Asia/Seoul"}, AcceptLanguage: "ko-KR,ko;q=0.9,en;q=0.8", Languages: []string{"ko-KR", "ko", "en"}},
+		"SG": {Country: "SG", Name: "Singapore", Locales: []string{"en-SG"}, Timezones: []string{"Asia/Singapore"}, AcceptLanguage: "en-SG,en;q=0.9", Languages: []string{"en-SG", "en"}},
+		"BR": {Country: "BR", Name: "Brazil", Locales: []string{"pt-BR"}, Timezones: []string{"America/Sao_Paulo"}, AcceptLanguage: "pt-BR,pt;q=0.9,en;q=0.8", Languages: []string{"pt-BR", "pt", "en"}},
+		"IN": {Country: "IN", Name: "India", Locales: []string{"en-IN"}, Timezones: []string{"Asia/Kolkata"}, AcceptLanguage: "en-IN,en;q=0.9", Languages: []string{"en-IN", "en"}},
+	}
+}
+
+func defaultClientHints() map[string]ClientHints {
+	return map[string]ClientHints{
+		PlatformWindows: defaultClientHintsForPlatform("Windows", "10.0.0", "x86", "64"),
+		PlatformMac:     defaultClientHintsForPlatform("macOS", "14.0.0", "arm", "64"),
+		PlatformLinux:   defaultClientHintsForPlatform("Linux", "", "x86", "64"),
+	}
+}
+
+func defaultClientHintsForPlatform(platform string, platformVersion string, architecture string, bitness string) ClientHints {
+	return ClientHints{
+		RuntimeCoverage: "data-only",
+		Brands: []ClientHintBrand{
+			{Brand: "Chromium", Version: "core-major"},
+			{Brand: "Google Chrome", Version: "core-major"},
+			{Brand: "Not/A)Brand", Version: "99"},
+		},
+		FullVersionList: []ClientHintBrand{
+			{Brand: "Chromium", Version: "core-full-version"},
+			{Brand: "Google Chrome", Version: "core-full-version"},
+			{Brand: "Not/A)Brand", Version: "99.0.0.0"},
+		},
+		Platform:        platform,
+		PlatformVersion: platformVersion,
+		Architecture:    architecture,
+		Bitness:         bitness,
+		Mobile:          false,
+		Notes:           []string{"Data model only; runtime UA-CH spoofing requires verified Chromium core support."},
 	}
 }
 
@@ -877,6 +1025,14 @@ func pickMedia(deviceClass string, current MediaDevices, pools map[string][]Medi
 	return items[r.Intn(len(items))]
 }
 
+func pickClientHints(platform string, current ClientHints, pools map[string]ClientHints) ClientHints {
+	hints, ok := pools[NormalizePlatform(platform)]
+	if !ok {
+		return current
+	}
+	return hints
+}
+
 func normalizeUniqueStrings(items []string) []string {
 	seen := map[string]struct{}{}
 	out := make([]string, 0, len(items))
@@ -891,6 +1047,103 @@ func normalizeUniqueStrings(items []string) []string {
 		}
 		seen[key] = struct{}{}
 		out = append(out, value)
+	}
+	return out
+}
+
+func normalizeLanguageTags(items []string) []string {
+	out := make([]string, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		value := strings.TrimSpace(item)
+		if value == "" {
+			continue
+		}
+		if before, _, ok := strings.Cut(value, ";"); ok {
+			value = strings.TrimSpace(before)
+		}
+		value = strings.ReplaceAll(value, "_", "-")
+		key := strings.ToLower(value)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, value)
+	}
+	return out
+}
+
+func languagesForLocale(locale string) []string {
+	languages := normalizeLanguageTags([]string{locale})
+	if len(languages) == 0 {
+		return nil
+	}
+	base := languages[0]
+	if before, _, ok := strings.Cut(base, "-"); ok {
+		base = before
+	}
+	if base != "" && !strings.EqualFold(base, languages[0]) {
+		languages = append(languages, base)
+	}
+	return normalizeLanguageTags(languages)
+}
+
+func languageTagListContains(items []string, want string) bool {
+	want = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(want), "_", "-"))
+	if want == "" {
+		return false
+	}
+	for _, item := range normalizeLanguageTags(items) {
+		if strings.ToLower(item) == want {
+			return true
+		}
+	}
+	return false
+}
+
+func normalizeAcceptLanguage(value string, languages []string) string {
+	value = strings.TrimSpace(value)
+	if value != "" {
+		return value
+	}
+	return buildAcceptLanguage(languages)
+}
+
+func buildAcceptLanguage(languages []string) string {
+	languages = normalizeLanguageTags(languages)
+	if len(languages) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(languages))
+	for index, language := range languages {
+		if index == 0 {
+			parts = append(parts, language)
+			continue
+		}
+		q := 10 - index
+		if q < 1 {
+			q = 1
+		}
+		parts = append(parts, language+";q=0."+strconv.Itoa(q))
+	}
+	return strings.Join(parts, ",")
+}
+
+func normalizeClientHintBrands(items []ClientHintBrand) []ClientHintBrand {
+	out := make([]ClientHintBrand, 0, len(items))
+	seen := map[string]struct{}{}
+	for _, item := range items {
+		brand := strings.TrimSpace(item.Brand)
+		version := strings.TrimSpace(item.Version)
+		if brand == "" || version == "" {
+			continue
+		}
+		key := strings.ToLower(brand)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, ClientHintBrand{Brand: brand, Version: version})
 	}
 	return out
 }

@@ -29,6 +29,7 @@ func TestGenerateFingerprintProfileReturnsCoherentArgs(t *testing.T) {
 		"--fingerprint-platform=mac",
 		"--lang=en-US",
 		"--fingerprint-locale=en-US",
+		"--fingerprint-accept-language=en-US,en;q=0.9",
 		"--timezone=America/New_York",
 		"--fingerprint-timezone=America/New_York",
 		"--webrtc-ip-handling-policy=disable_non_proxied_udp",
@@ -249,6 +250,7 @@ func TestGenerateFingerprintProfileUsesProxyIPHealthCache(t *testing.T) {
 	for _, want := range []string{
 		"--lang=en-US",
 		"--fingerprint-locale=en-US",
+		"--fingerprint-accept-language=en-US,en;q=0.9",
 		"--timezone=America/Los_Angeles",
 		"--fingerprint-timezone=America/Los_Angeles",
 		"--fingerprint-webrtc-ip=203.0.113.42",

@@ -1,6 +1,7 @@
 package automation
 
 const DualInstanceRuntimeScriptID = "dual-instance-runtime-switch"
+const FingerprintAuditScriptID = "fingerprint-audit"
 
 func DefaultScripts() []ScriptRecord {
 	return []ScriptRecord{
@@ -799,6 +800,417 @@ module.exports.run = async ({ launch, connect, selector, params, log, artifact }
 				URI:  "repo://backend/internal/automation/default_scripts.go",
 				Ref:  "HEAD",
 				Path: "news-query-txt",
+			},
+		},
+		{
+			ID:          FingerprintAuditScriptID,
+			Name:        "指纹回归采集",
+			Description: "复用 Playwright CDP 连接当前实例，采集本地指纹 probe，并可选保存检测站截图与 HTML。",
+			Type:        "playwright-cdp",
+			Status:      "ready",
+			EntryFile:   "index.cjs",
+			Tags:        []string{"Playwright", "Fingerprint", "Audit"},
+			ParamsText: `{
+  "detectors": [
+    "browserscan",
+    "creepjs"
+  ],
+  "localProbeOnly": false,
+  "captureScreenshot": true,
+  "saveHtml": true,
+  "waitAfterLoadMs": 5000,
+  "timeoutMs": 120000
+}`,
+			ScriptText: `const fs = require('fs')
+
+const DETECTOR_PRESETS = {
+  browserscan: 'https://www.browserscan.net/',
+  creepjs: 'https://abrahamjuliot.github.io/creepjs/',
+  fingerprint: 'https://demo.fingerprint.com/playground',
+  fingerprintjs: 'https://demo.fingerprint.com/playground',
+  incolumitas: 'https://bot.incolumitas.com/',
+  bot: 'https://bot.incolumitas.com/',
+  deviceinfo: 'https://deviceandbrowserinfo.com/',
+  deviceandbrowserinfo: 'https://deviceandbrowserinfo.com/',
+}
+
+function normalizeInt(value, fallback, min, max) {
+  const parsed = Number(value)
+  if (!Number.isFinite(parsed)) {
+    return fallback
+  }
+
+  const rounded = Math.round(parsed)
+  if (rounded < min) {
+    return min
+  }
+  if (rounded > max) {
+    return max
+  }
+  return rounded
+}
+
+function normalizeBool(value, fallback) {
+  if (typeof value === 'boolean') {
+    return value
+  }
+  if (typeof value === 'string') {
+    const normalized = value.trim().toLowerCase()
+    if (['1', 'true', 'yes', 'y', 'on'].includes(normalized)) {
+      return true
+    }
+    if (['0', 'false', 'no', 'n', 'off'].includes(normalized)) {
+      return false
+    }
+  }
+  return fallback
+}
+
+function normalizeDetectorEntries(value) {
+  if (!Array.isArray(value)) {
+    return []
+  }
+
+  const result = []
+  const seen = new Set()
+  for (const item of value) {
+    let id = ''
+    let url = ''
+    if (typeof item === 'string') {
+      const raw = item.trim()
+      if (!raw) {
+        continue
+      }
+      const preset = DETECTOR_PRESETS[raw.toLowerCase()]
+      id = raw.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || 'detector'
+      url = preset || raw
+    } else if (item && typeof item === 'object') {
+      const rawId = String(item.id || item.name || item.key || '').trim()
+      const rawUrl = String(item.url || item.href || '').trim()
+      if (!rawUrl && rawId) {
+        url = DETECTOR_PRESETS[rawId.toLowerCase()] || ''
+      } else {
+        url = rawUrl
+      }
+      id =
+        rawId.toLowerCase().replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') ||
+        String(url || 'detector').toLowerCase().replace(/^https?:\/\//, '').replace(/[^a-z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') ||
+        'detector'
+    }
+
+    if (!url || !/^https?:\/\//i.test(url)) {
+      continue
+    }
+    let normalizedUrl = url
+    try {
+      normalizedUrl = new URL(url).toString()
+    } catch {
+      continue
+    }
+    const dedupeKey = id + '\n' + normalizedUrl
+    if (seen.has(dedupeKey)) {
+      continue
+    }
+    seen.add(dedupeKey)
+    result.push({ id, url: normalizedUrl })
+  }
+  return result
+}
+
+function writeJSON(filePath, value) {
+  fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n', 'utf8')
+}
+
+function safeFilePart(value, fallback) {
+  return String(value || fallback || 'item')
+    .trim()
+    .toLowerCase()
+    .replace(/^https?:\/\//, '')
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 80) || String(fallback || 'item')
+}
+
+async function collectLocalProbe(page) {
+  return page.evaluate(async function () {
+    const safe = function (fn, fallback) {
+      try {
+        return fn()
+      } catch (error) {
+        return fallback
+      }
+    }
+
+    const serializePluginArray = function (items) {
+      return Array.prototype.slice.call(items || []).map(function (item) {
+        return {
+          name: String(item && item.name || ''),
+          filename: String(item && item.filename || ''),
+          description: String(item && item.description || ''),
+          length: Number(item && item.length || 0),
+        }
+      })
+    }
+
+    const serializeMimeTypeArray = function (items) {
+      return Array.prototype.slice.call(items || []).map(function (item) {
+        return {
+          type: String(item && item.type || ''),
+          suffixes: String(item && item.suffixes || ''),
+          description: String(item && item.description || ''),
+          enabledPlugin: String(item && item.enabledPlugin && item.enabledPlugin.name || ''),
+        }
+      })
+    }
+
+    const getUserAgentData = async function () {
+      const uaData = navigator.userAgentData
+      if (!uaData) {
+        return null
+      }
+      const base = {
+        brands: safe(function () { return Array.prototype.slice.call(uaData.brands || []) }, []),
+        mobile: safe(function () { return Boolean(uaData.mobile) }, false),
+        platform: safe(function () { return String(uaData.platform || '') }, ''),
+      }
+      if (typeof uaData.getHighEntropyValues !== 'function') {
+        return base
+      }
+      try {
+        const high = await uaData.getHighEntropyValues([
+          'architecture',
+          'bitness',
+          'fullVersionList',
+          'model',
+          'platformVersion',
+          'uaFullVersion',
+          'wow64',
+        ])
+        return Object.assign(base, high || {})
+      } catch (error) {
+        return Object.assign(base, { error: error && error.message ? error.message : String(error) })
+      }
+    }
+
+    const getWebGL = function () {
+      const canvas = document.createElement('canvas')
+      const gl =
+        canvas.getContext('webgl') ||
+        canvas.getContext('experimental-webgl')
+      if (!gl) {
+        return { supported: false }
+      }
+      const debugInfo = safe(function () { return gl.getExtension('WEBGL_debug_renderer_info') }, null)
+      return {
+        supported: true,
+        vendor: debugInfo ? safe(function () { return String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '') }, '') : safe(function () { return String(gl.getParameter(gl.VENDOR) || '') }, ''),
+        renderer: debugInfo ? safe(function () { return String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '') }, '') : safe(function () { return String(gl.getParameter(gl.RENDERER) || '') }, ''),
+        version: safe(function () { return String(gl.getParameter(gl.VERSION) || '') }, ''),
+        shadingLanguageVersion: safe(function () { return String(gl.getParameter(gl.SHADING_LANGUAGE_VERSION) || '') }, ''),
+        extensions: safe(function () { return gl.getSupportedExtensions() || [] }, []),
+        limits: {
+          maxTextureSize: safe(function () { return gl.getParameter(gl.MAX_TEXTURE_SIZE) }, null),
+          maxCubeMapTextureSize: safe(function () { return gl.getParameter(gl.MAX_CUBE_MAP_TEXTURE_SIZE) }, null),
+          maxRenderbufferSize: safe(function () { return gl.getParameter(gl.MAX_RENDERBUFFER_SIZE) }, null),
+          maxViewportDims: safe(function () { return Array.prototype.slice.call(gl.getParameter(gl.MAX_VIEWPORT_DIMS) || []) }, []),
+          maxCombinedTextureImageUnits: safe(function () { return gl.getParameter(gl.MAX_COMBINED_TEXTURE_IMAGE_UNITS) }, null),
+        },
+      }
+    }
+
+    const getStorageEstimate = async function () {
+      if (!navigator.storage || typeof navigator.storage.estimate !== 'function') {
+        return null
+      }
+      try {
+        return await navigator.storage.estimate()
+      } catch (error) {
+        return { error: error && error.message ? error.message : String(error) }
+      }
+    }
+
+    const resolvedDateTime = safe(function () { return Intl.DateTimeFormat().resolvedOptions() }, {})
+    return {
+      collectedAt: new Date().toISOString(),
+      url: location.href,
+      navigator: {
+        webdriver: safe(function () { return navigator.webdriver }, null),
+        userAgent: safe(function () { return navigator.userAgent }, ''),
+        userAgentData: await getUserAgentData(),
+        language: safe(function () { return navigator.language }, ''),
+        languages: safe(function () { return Array.prototype.slice.call(navigator.languages || []) }, []),
+        platform: safe(function () { return navigator.platform }, ''),
+        vendor: safe(function () { return navigator.vendor }, ''),
+        hardwareConcurrency: safe(function () { return navigator.hardwareConcurrency }, null),
+        deviceMemory: safe(function () { return navigator.deviceMemory }, null),
+        maxTouchPoints: safe(function () { return navigator.maxTouchPoints }, null),
+        pdfViewerEnabled: safe(function () { return navigator.pdfViewerEnabled }, null),
+      },
+      intl: {
+        timezone: resolvedDateTime.timeZone || '',
+        locale: resolvedDateTime.locale || '',
+        calendar: resolvedDateTime.calendar || '',
+        numberingSystem: resolvedDateTime.numberingSystem || '',
+      },
+      screen: {
+        width: safe(function () { return screen.width }, null),
+        height: safe(function () { return screen.height }, null),
+        availWidth: safe(function () { return screen.availWidth }, null),
+        availHeight: safe(function () { return screen.availHeight }, null),
+        colorDepth: safe(function () { return screen.colorDepth }, null),
+        pixelDepth: safe(function () { return screen.pixelDepth }, null),
+        devicePixelRatio: safe(function () { return window.devicePixelRatio }, null),
+        innerWidth: safe(function () { return window.innerWidth }, null),
+        innerHeight: safe(function () { return window.innerHeight }, null),
+        outerWidth: safe(function () { return window.outerWidth }, null),
+        outerHeight: safe(function () { return window.outerHeight }, null),
+        visualViewport: safe(function () {
+          if (!window.visualViewport) {
+            return null
+          }
+          return {
+            width: window.visualViewport.width,
+            height: window.visualViewport.height,
+            scale: window.visualViewport.scale,
+          }
+        }, null),
+      },
+      webgl: getWebGL(),
+      plugins: serializePluginArray(navigator.plugins),
+      mimeTypes: serializeMimeTypeArray(navigator.mimeTypes),
+      storage: await getStorageEstimate(),
+    }
+  })
+}
+
+module.exports.run = async ({ launch, connect, selector, params, log, artifact, artifactsDir }) => {
+  const timeout = normalizeInt(params.timeoutMs, 120000, 1000, 300000)
+  const waitAfterLoadMs = normalizeInt(params.waitAfterLoadMs, 5000, 0, 60000)
+  const localProbeOnly = normalizeBool(params.localProbeOnly, false)
+  const captureScreenshot = normalizeBool(params.captureScreenshot, true)
+  const saveHtml = normalizeBool(params.saveHtml, true)
+  const detectors = localProbeOnly ? [] : normalizeDetectorEntries(params.detectors)
+  const startedAt = new Date().toISOString()
+
+  const session = await launch({
+    selector,
+    skipDefaultStartUrls: true,
+    startUrls: [],
+  })
+  const connection = await connect(session)
+  const browser = connection.browser
+  const context = connection.context || browser.contexts()[0]
+  if (!context) {
+    throw new Error('CDP 连接成功，但没有可用 browser context')
+  }
+
+  const page = await context.newPage()
+  const artifacts = {
+    rootDir: artifactsDir || '',
+    localProbe: '',
+    report: '',
+    detectors: [],
+  }
+  const detectorResults = []
+  let localProbe = null
+
+  try {
+    await page.goto('about:blank', { waitUntil: 'load', timeout })
+    localProbe = await collectLocalProbe(page)
+    artifacts.localProbe = artifact('local-probe.json')
+    writeJSON(artifacts.localProbe, localProbe)
+    log('localProbePath', artifacts.localProbe)
+
+    for (const detector of detectors) {
+      const detectorId = safeFilePart(detector.id, 'detector')
+      const detectorArtifact = {
+        id: detectorId,
+        url: detector.url,
+        finalUrl: '',
+        screenshotPath: '',
+        htmlPath: '',
+        error: '',
+      }
+
+      try {
+        await page.goto(detector.url, { waitUntil: 'domcontentloaded', timeout })
+        if (waitAfterLoadMs > 0) {
+          await page.waitForTimeout(waitAfterLoadMs)
+        }
+        detectorArtifact.finalUrl = page.url()
+
+        if (captureScreenshot) {
+          detectorArtifact.screenshotPath = artifact('detectors/' + detectorId + '/screenshot.png')
+          await page.screenshot({ path: detectorArtifact.screenshotPath, fullPage: true })
+        }
+
+        if (saveHtml) {
+          detectorArtifact.htmlPath = artifact('detectors/' + detectorId + '/page.html')
+          fs.writeFileSync(detectorArtifact.htmlPath, await page.content(), 'utf8')
+        }
+      } catch (error) {
+        detectorArtifact.error = error && error.message ? error.message : String(error)
+      }
+
+      artifacts.detectors.push(detectorArtifact)
+      detectorResults.push(detectorArtifact)
+      log('detector', detectorArtifact)
+    }
+  } finally {
+    if (!page.isClosed()) {
+      await page.close().catch(function () {})
+    }
+  }
+
+  const report = {
+    schemaVersion: 1,
+    auditId: 'fingerprint-audit-' + Date.now(),
+    createdAt: startedAt,
+    finishedAt: new Date().toISOString(),
+    selector: selector || {},
+    params: {
+      detectors,
+      localProbeOnly,
+      captureScreenshot,
+      saveHtml,
+      waitAfterLoadMs,
+      timeoutMs: timeout,
+    },
+    session,
+    observed: {
+      localProbe,
+      detectorResults,
+    },
+    validation: {
+      status: 'manual',
+      notes: '第三方检测站结果仅采集，不作为自动阻断。',
+    },
+    artifacts,
+  }
+  artifacts.report = artifact('report.json')
+  writeJSON(artifacts.report, report)
+  log('reportPath', artifacts.report)
+
+  const detectorErrorCount = detectorResults.filter(function (item) { return item.error }).length
+  return {
+    ok: true,
+    summary:
+      '指纹采集完成：local probe 已保存' +
+      (detectorResults.length > 0 ? '，检测站 ' + detectorResults.length + ' 个' : '') +
+      (detectorErrorCount > 0 ? '，其中 ' + detectorErrorCount + ' 个打开失败' : ''),
+    reportPath: artifacts.report,
+    localProbePath: artifacts.localProbe,
+    detectorCount: detectorResults.length,
+    detectorErrorCount,
+    artifacts,
+  }
+}`,
+			Notes: "采集脚本只生成 probe/report 和可选检测站截图/HTML，不解析第三方站点分数，也不会把检测站结果作为 CI 阻断。建议先用 localProbeOnly=true 跑通 profile，再按需加入 BrowserScan、CreepJS 等 detectors。",
+			Source: ScriptSource{
+				Type: "builtin",
+				URI:  "repo://backend/internal/automation/default_scripts.go",
+				Ref:  "HEAD",
+				Path: FingerprintAuditScriptID,
 			},
 		},
 	}

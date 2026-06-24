@@ -1,0 +1,68 @@
+{
+  "windows": {
+    "runtimeCoverage": "data-only",
+    "brands": [
+      { "brand": "Chromium", "version": "core-major" },
+      { "brand": "Google Chrome", "version": "core-major" },
+      { "brand": "Not/A)Brand", "version": "99" }
+    ],
+    "fullVersionList": [
+      { "brand": "Chromium", "version": "core-full-version" },
+      { "brand": "Google Chrome", "version": "core-full-version" },
+      { "brand": "Not/A)Brand", "version": "99.0.0.0" }
+    ],
+    "platform": "Windows",
+    "platformVersion": "10.0.0",
+    "architecture": "x86",
+    "bitness": "64",
+    "mobile": false,
+    "model": "",
+    "notes": [
+      "Data model only; runtime UA-CH spoofing requires verified Chromium core support."
+    ]
+  },
+  "mac": {
+    "runtimeCoverage": "data-only",
+    "brands": [
+      { "brand": "Chromium", "version": "core-major" },
+      { "brand": "Google Chrome", "version": "core-major" },
+      { "brand": "Not/A)Brand", "version": "99" }
+    ],
+    "fullVersionList": [
+      { "brand": "Chromium", "version": "core-full-version" },
+      { "brand": "Google Chrome", "version": "core-full-version" },
+      { "brand": "Not/A)Brand", "version": "99.0.0.0" }
+    ],
+    "platform": "macOS",
+    "platformVersion": "14.0.0",
+    "architecture": "arm",
+    "bitness": "64",
+    "mobile": false,
+    "model": "",
+    "notes": [
+      "Data model only; runtime UA-CH spoofing requires verified Chromium core support."
+    ]
+  },
+  "linux": {
+    "runtimeCoverage": "data-only",
+    "brands": [
+      { "brand": "Chromium", "version": "core-major" },
+      { "brand": "Google Chrome", "version": "core-major" },
+      { "brand": "Not/A)Brand", "version": "99" }
+    ],
+    "fullVersionList": [
+      { "brand": "Chromium", "version": "core-full-version" },
+      { "brand": "Google Chrome", "version": "core-full-version" },
+      { "brand": "Not/A)Brand", "version": "99.0.0.0" }
+    ],
+    "platform": "Linux",
+    "platformVersion": "",
+    "architecture": "x86",
+    "bitness": "64",
+    "mobile": false,
+    "model": "",
+    "notes": [
+      "Data model only; runtime UA-CH spoofing requires verified Chromium core support."
+    ]
+  }
+}

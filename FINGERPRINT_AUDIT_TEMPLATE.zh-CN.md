@@ -2,6 +2,29 @@
 
 本模板用于 P0/P1 阶段记录检测站结果。现阶段只做采集与人工判读，不把第三方站点分数作为 CI 阻断项。
 
+## 内置采集入口
+
+P0-D 阶段新增内置自动化脚本 `fingerprint-audit`，类型为 `playwright-cdp`。它复用现有 automation runner 与 Launch API 启动/连接 profile，默认先保存本地 probe，再按需打开检测站并保存截图/HTML。
+
+示例请求：
+
+```json
+{
+  "scriptId": "fingerprint-audit",
+  "selector": { "code": "BUYER_001", "matchMode": "unique" },
+  "params": {
+    "detectors": ["browserscan", "creepjs"],
+    "localProbeOnly": false,
+    "captureScreenshot": true,
+    "saveHtml": true,
+    "waitAfterLoadMs": 5000,
+    "timeoutMs": 120000
+  }
+}
+```
+
+最小离线采集可设置 `"localProbeOnly": true`，此时只生成 `local-probe.json` 与 `report.json`。检测站页面评分不解析、不作为 CI 阻断。
+
 ## 检测站点
 
 - Fingerprint.com Playground: `https://demo.fingerprint.com/playground`

@@ -36,6 +36,9 @@ func TestDefaultArgsForOS(t *testing.T) {
 		if !hasArgPrefix(got, "--fingerprint-device-pixel-ratio=") {
 			t.Fatalf("%s: missing device pixel ratio in %v", goos, got)
 		}
+		if !hasArgPrefix(got, "--fingerprint-accept-language=") {
+			t.Fatalf("%s: missing accept-language in %v", goos, got)
+		}
 	}
 }
 
@@ -53,6 +56,15 @@ func TestLoadLibraryFromData(t *testing.T) {
 	}
 	if len(lib.fonts) < 3 || len(lib.webgl) < 3 || len(lib.media) < 4 || len(lib.screen.Desktop) == 0 {
 		t.Fatalf("expected embedded distribution data, got fonts=%d webgl=%d media=%d screen=%#v", len(lib.fonts), len(lib.webgl), len(lib.media), lib.screen)
+	}
+	if len(lib.clientHints) < 3 {
+		t.Fatalf("expected embedded client hints data, got %d", len(lib.clientHints))
+	}
+	if lib.regions["US"].AcceptLanguage != "en-US,en;q=0.9" {
+		t.Fatalf("expected US accept-language stack, got %#v", lib.regions["US"])
+	}
+	if got := lib.clientHints[PlatformWindows]; got.RuntimeCoverage != "data-only" || len(got.Brands) == 0 {
+		t.Fatalf("expected data-only Windows client hints skeleton, got %#v", got)
 	}
 }
 
@@ -130,6 +142,41 @@ func TestGenerateUsesDistributionData(t *testing.T) {
 	}
 }
 
+func TestGenerateAddsLocaleLanguageStack(t *testing.T) {
+	t.Parallel()
+
+	lib := LoadLibrary()
+	us, err := Generate(lib, GenerateOptions{ProfileID: "profile-us", Platform: "windows", Country: "US"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if us.Locale != "en-US" || us.AcceptLanguage != "en-US,en;q=0.9" || !contains(us.Languages, "en-US") || !contains(us.Languages, "en") {
+		t.Fatalf("expected US language stack, got locale=%q acceptLanguage=%q languages=%#v", us.Locale, us.AcceptLanguage, us.Languages)
+	}
+	if us.ClientHints.RuntimeCoverage != "data-only" || us.ClientHints.Platform != "Windows" {
+		t.Fatalf("expected Windows UA-CH data-only skeleton, got %#v", us.ClientHints)
+	}
+
+	cn, err := Generate(lib, GenerateOptions{ProfileID: "profile-cn", Platform: "windows", Country: "CN"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cn.Locale != "zh-CN" || cn.AcceptLanguage != "zh-CN,zh;q=0.9" || !contains(cn.Languages, "zh-CN") || !contains(cn.Languages, "zh") {
+		t.Fatalf("expected CN language stack, got locale=%q acceptLanguage=%q languages=%#v", cn.Locale, cn.AcceptLanguage, cn.Languages)
+	}
+
+	manualLocale, err := Generate(lib, GenerateOptions{ProfileID: "profile-manual-locale", Platform: "windows", Country: "CN", Locale: "en-US"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if manualLocale.AcceptLanguage != "en-US,en;q=0.9" || !contains(manualLocale.Languages, "en-US") || !contains(manualLocale.Languages, "en") {
+		t.Fatalf("expected explicit locale language stack, got locale=%q acceptLanguage=%q languages=%#v", manualLocale.Locale, manualLocale.AcceptLanguage, manualLocale.Languages)
+	}
+	if !contains(Args(us), "--fingerprint-accept-language=en-US,en;q=0.9") {
+		t.Fatalf("expected generated args to include accept-language, got %#v", Args(us))
+	}
+}
+
 func TestValidateArgsDetectsMismatches(t *testing.T) {
 	t.Parallel()
 	report := Health([]string{
@@ -146,6 +193,56 @@ func TestValidateArgsDetectsMismatches(t *testing.T) {
 	}
 	if len(report.Issues) == 0 {
 		t.Fatalf("expected validation issues")
+	}
+}
+
+func TestValidateArgsChecksAcceptLanguageLocale(t *testing.T) {
+	t.Parallel()
+
+	report := Health([]string{
+		"--fingerprint=111",
+		"--fingerprint-brand=Chrome",
+		"--fingerprint-platform=windows",
+		"--lang=en-US",
+		"--fingerprint-locale=en-US",
+		"--fingerprint-accept-language=zh-CN,zh;q=0.9",
+		"--fingerprint-fonts=Arial,Calibri",
+		"--fingerprint-webgl-vendor=Intel",
+		"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+	})
+	if report.Status != "yellow" || !hasIssue(report, "accept_language_locale_mismatch") {
+		t.Fatalf("expected accept-language mismatch warning, got %#v", report)
+	}
+
+	ok := Health([]string{
+		"--fingerprint=111",
+		"--fingerprint-brand=Chrome",
+		"--fingerprint-platform=windows",
+		"--lang=zh-CN",
+		"--fingerprint-locale=zh-CN",
+		"--accept-language=zh-CN,zh;q=0.9",
+		"--fingerprint-fonts=Arial,Calibri",
+		"--fingerprint-webgl-vendor=Intel",
+		"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+	})
+	if hasIssue(ok, "accept_language_locale_mismatch") {
+		t.Fatalf("did not expect accept-language mismatch warning, got %#v", ok)
+	}
+
+	aliasMismatch := Health([]string{
+		"--fingerprint=111",
+		"--fingerprint-brand=Chrome",
+		"--fingerprint-platform=windows",
+		"--lang=en-US",
+		"--fingerprint-locale=en-US",
+		"--fingerprint-accept-language=en-US,en;q=0.9",
+		"--accept-language=zh-CN,zh;q=0.9",
+		"--fingerprint-fonts=Arial,Calibri",
+		"--fingerprint-webgl-vendor=Intel",
+		"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+	})
+	if !hasIssue(aliasMismatch, "accept_language_alias_mismatch") {
+		t.Fatalf("expected accept-language alias mismatch warning, got %#v", aliasMismatch)
 	}
 }
 

@@ -24,18 +24,18 @@ func TestAutomationScriptListSeedsDefaultScriptsOnFreshApp(t *testing.T) {
 	if err != nil {
 		t.Fatalf("AutomationScriptList returned error: %v", err)
 	}
-	if len(items) != 2 {
-		t.Fatalf("expected two default scripts, got %d", len(items))
-	}
-
 	byID := make(map[string]automation.ScriptRecord, len(items))
 	for _, script := range items {
 		byID[script.ID] = script
 	}
 
 	expectedNames := map[string]string{
-		"dual-instance-runtime-switch": "双实例启动与 Runtime 切换",
-		"news-query-txt":               "查询新闻并写 TXT",
+		automation.DualInstanceRuntimeScriptID: "双实例启动与 Runtime 切换",
+		automation.FingerprintAuditScriptID:    "指纹回归采集",
+		"news-query-txt":                       "查询新闻并写 TXT",
+	}
+	if len(items) != len(expectedNames) {
+		t.Fatalf("expected %d default scripts, got %d", len(expectedNames), len(items))
 	}
 
 	for scriptID, expectedName := range expectedNames {

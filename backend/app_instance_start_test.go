@@ -589,8 +589,9 @@ func TestMergeLaunchArgsDeduplicatesSingleValueFingerprintFlags(t *testing.T) {
 
 	got := mergeLaunchArgs(
 		[]string{"--fingerprint=111", "--fingerprint-platform=windows", "--lang=en-US", "--disable-sync"},
-		[]string{"--fingerprint-platform=mac", "--window-size=1280,800"},
+		[]string{"--fingerprint-platform=mac", "--window-size=1280,800", "--fingerprint-do-not-track=false"},
 		[]string{"--lang=ja-JP", "--fingerprint-webrtc-ip=1.2.3.4", "--window-size=1440,900"},
+		[]string{"--fingerprint-do-not-track=true"},
 	)
 	want := []string{
 		"--fingerprint=111",
@@ -598,6 +599,7 @@ func TestMergeLaunchArgsDeduplicatesSingleValueFingerprintFlags(t *testing.T) {
 		"--lang=ja-JP",
 		"--disable-sync",
 		"--window-size=1440,900",
+		"--fingerprint-do-not-track=true",
 		"--fingerprint-webrtc-ip=1.2.3.4",
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -619,6 +621,23 @@ func TestMergeLaunchArgsNormalizesSeparatedSingleValueFlags(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("mergeLaunchArgs separated value mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func TestMergeLaunchArgsCanonicalizesAcceptLanguageAlias(t *testing.T) {
+	t.Parallel()
+
+	got := mergeLaunchArgs(
+		[]string{"--accept-language", "zh-CN,zh;q=0.9", "--fingerprint-platform=windows"},
+		[]string{"--fingerprint-accept-language=en-US,en;q=0.9"},
+		[]string{"--accept-language=ja-JP,ja;q=0.9"},
+	)
+	want := []string{
+		"--fingerprint-accept-language=ja-JP,ja;q=0.9",
+		"--fingerprint-platform=windows",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mergeLaunchArgs accept-language alias mismatch:\n got=%v\nwant=%v", got, want)
 	}
 }
 

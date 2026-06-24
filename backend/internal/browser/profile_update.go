@@ -24,11 +24,12 @@ func (m *Manager) Update(profileId string, input ProfileInput) (*Profile, error)
 		log.Error("代理绑定失败", logger.F("profile_id", profileId), logger.F("proxy_id", strings.TrimSpace(input.ProxyId)), logger.F("error", err.Error()))
 		return nil, err
 	}
+	proxyFingerprintCtx := proxyFingerprintRegionContextFromResolvedProxy(resolvedProxy)
 
 	profile.ProfileName = input.ProfileName
 	profile.UserDataDir = input.UserDataDir
 	profile.CoreId = normalizeProfileCoreID(input.CoreId)
-	profile.FingerprintArgs = m.defaultFingerprintArgsForProfile(profileId, input.FingerprintArgs, nil, platformFromFingerprintArgs(input.FingerprintArgs))
+	profile.FingerprintArgs = m.defaultFingerprintArgsForProfileWithProxyRegion(profileId, input.FingerprintArgs, nil, platformFromFingerprintArgs(input.FingerprintArgs), proxyFingerprintCtx)
 	if resolvedProxy.HasSelectedProxy {
 		_ = BindProfileToProxy(profile, resolvedProxy.SelectedProxy, true)
 	} else if resolvedProxy.FallbackToDirect {

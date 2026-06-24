@@ -7,6 +7,7 @@ import {
   type FingerprintConfig,
   FINGERPRINT_PRESETS,
   PRESET_RESOLUTIONS,
+  defaultAcceptLanguage,
   deserialize,
   getSystemTimezone,
   serialize,
@@ -38,6 +39,7 @@ const LANG_OPTIONS = [
   { value: 'zh-CN', label: '中文 (zh-CN)' },
   { value: 'en-US', label: 'English (en-US)' },
   { value: 'en-GB', label: 'English (en-GB)' },
+  { value: 'en-SG', label: 'English (en-SG)' },
   { value: 'ja-JP', label: '日本語 (ja-JP)' },
   { value: 'ko-KR', label: '한국어 (ko-KR)' },
   { value: 'fr-FR', label: 'Français (fr-FR)' },
@@ -226,7 +228,7 @@ function healthDimensions(health: FingerprintHealthReport) {
     { label: '平台', status: dimensionStatus(health, ['--fingerprint-platform', '--fingerprint-brand', '--user-agent']) },
     { label: '字体', status: dimensionStatus(health, ['--fingerprint-fonts']) },
     { label: 'WebGL', status: dimensionStatus(health, ['--fingerprint-webgl']) },
-    { label: '语言/时区', status: dimensionStatus(health, ['--lang', '--fingerprint-locale', '--timezone', '--fingerprint-timezone']) },
+    { label: '语言/时区', status: dimensionStatus(health, ['--lang', '--fingerprint-locale', '--fingerprint-accept-language', '--accept-language', '--timezone', '--fingerprint-timezone']) },
     { label: 'WebRTC', status: dimensionStatus(health, ['--fingerprint-webrtc-ip', '--webrtc-ip-handling-policy']) },
     { label: 'Seed', status: dimensionStatus(health, ['--fingerprint']) },
   ]
@@ -499,7 +501,14 @@ export function FingerprintPanel({ value, onChange, profileId, proxyId, proxyCon
             />
           </FormItem>
           <FormItem label="语言">
-            <Select value={config.lang ?? ''} onChange={e => update({ lang: e.target.value || undefined })} options={LANG_OPTIONS} />
+            <Select
+              value={config.lang ?? ''}
+              onChange={e => {
+                const lang = e.target.value || undefined
+                update({ lang, fingerprintLocale: undefined, acceptLanguage: defaultAcceptLanguage(lang) || undefined })
+              }}
+              options={LANG_OPTIONS}
+            />
           </FormItem>
           <FormItem label="时区">
             <Select value={config.timezone ?? ''} onChange={e => update({ timezone: e.target.value || undefined })} options={TIMEZONE_OPTIONS.map(opt =>

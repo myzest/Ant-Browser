@@ -47,6 +47,7 @@ func ValidateArgsWithContext(args []string, ctx ValidationContext) []ValidationI
 	if values["--lang"] != "" && values["--fingerprint-locale"] != "" && !strings.EqualFold(values["--lang"], values["--fingerprint-locale"]) {
 		issues = append(issues, issue("locale_mismatch", "yellow", "--fingerprint-locale", "lang 与 fingerprint locale 不一致"))
 	}
+	issues = append(issues, validateAcceptLanguage(values)...)
 	if values["--timezone"] != "" && values["--fingerprint-timezone"] != "" && !strings.EqualFold(values["--timezone"], values["--fingerprint-timezone"]) {
 		issues = append(issues, issue("timezone_mismatch", "yellow", "--fingerprint-timezone", "timezone 与 fingerprint timezone 不一致"))
 	}
@@ -166,6 +167,31 @@ func validateUserAgent(args []string) []ValidationIssue {
 	return nil
 }
 
+func validateAcceptLanguage(values map[string]string) []ValidationIssue {
+	canonical := strings.TrimSpace(values["--fingerprint-accept-language"])
+	alias := strings.TrimSpace(values["--accept-language"])
+	issues := make([]ValidationIssue, 0, 2)
+	if canonical != "" && alias != "" && !strings.EqualFold(canonical, alias) {
+		issues = append(issues, issue("accept_language_alias_mismatch", "yellow", "--accept-language", "accept-language 与 fingerprint accept-language 不一致"))
+	}
+	acceptLanguage := firstNonEmpty(canonical, alias)
+	if acceptLanguage == "" {
+		return issues
+	}
+	primary := primaryLanguageTag(acceptLanguage)
+	if primary == "" {
+		return append(issues, issue("invalid_accept_language", "yellow", "--fingerprint-accept-language", "Accept-Language 语言栈格式异常"))
+	}
+	locale := firstNonEmpty(values["--fingerprint-locale"], values["--lang"])
+	if locale == "" {
+		return issues
+	}
+	if !languageTagCompatible(locale, primary) {
+		issues = append(issues, issue("accept_language_locale_mismatch", "yellow", "--fingerprint-accept-language", "Accept-Language 与 locale 不一致"))
+	}
+	return issues
+}
+
 func validateProxyRegion(values map[string]string, ctx ValidationContext) []ValidationIssue {
 	country := strings.ToUpper(strings.TrimSpace(ctx.ProxyCountry))
 	if country == "" {
@@ -186,6 +212,41 @@ func validateProxyRegion(values map[string]string, ctx ValidationContext) []Vali
 		issues = append(issues, issue("proxy_timezone_mismatch", "yellow", "--fingerprint-timezone", "时区与代理地区 "+normalizedCountry+" 不一致"))
 	}
 	return issues
+}
+
+func primaryLanguageTag(acceptLanguage string) string {
+	first := strings.TrimSpace(strings.Split(acceptLanguage, ",")[0])
+	if first == "" {
+		return ""
+	}
+	if value, _, ok := strings.Cut(first, ";"); ok {
+		first = strings.TrimSpace(value)
+	}
+	first = strings.ReplaceAll(first, "_", "-")
+	if first == "" || strings.ContainsAny(first, " \t") {
+		return ""
+	}
+	return first
+}
+
+func languageTagCompatible(locale string, language string) bool {
+	locale = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(locale), "_", "-"))
+	language = strings.ToLower(strings.ReplaceAll(strings.TrimSpace(language), "_", "-"))
+	if locale == "" || language == "" {
+		return true
+	}
+	if locale == language {
+		return true
+	}
+	localeBase := locale
+	if before, _, ok := strings.Cut(localeBase, "-"); ok {
+		localeBase = before
+	}
+	languageBase := language
+	if before, _, ok := strings.Cut(languageBase, "-"); ok {
+		languageBase = before
+	}
+	return localeBase != "" && localeBase == languageBase
 }
 
 func firstNonEmpty(values ...string) string {

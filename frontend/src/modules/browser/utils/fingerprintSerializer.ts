@@ -20,6 +20,7 @@ export interface FingerprintConfig {
   brand?: string           // --fingerprint-brand=
   platform?: string        // --fingerprint-platform=
   lang?: string            // --lang=
+  acceptLanguage?: string  // --fingerprint-accept-language=
   timezone?: string        // --timezone=
   fingerprintLocale?: string   // --fingerprint-locale=
   fingerprintTimezone?: string // --fingerprint-timezone=
@@ -66,6 +67,8 @@ export const KEY_MAP: Record<string, keyof FingerprintConfig> = {
   '--fingerprint-brand': 'brand',
   '--fingerprint-platform': 'platform',
   '--lang': 'lang',
+  '--fingerprint-accept-language': 'acceptLanguage',
+  '--accept-language': 'acceptLanguage',
   '--timezone': 'timezone',
   '--fingerprint-locale': 'fingerprintLocale',
   '--fingerprint-timezone': 'fingerprintTimezone',
@@ -116,6 +119,37 @@ function filterUnknownArgs(unknownArgs?: string[]): string[] {
   return filtered
 }
 
+export function defaultAcceptLanguage(locale?: string): string {
+  const normalized = normalizeLocaleForAcceptLanguage(locale)
+  if (!normalized) {
+    return ''
+  }
+
+  const baseLanguage = normalized.split('-')[0]
+  if (!baseLanguage || baseLanguage === normalized) {
+    return normalized
+  }
+  return `${normalized},${baseLanguage};q=0.9`
+}
+
+function normalizeLocaleForAcceptLanguage(locale?: string): string {
+  const value = (locale || '').trim()
+  if (!value) {
+    return ''
+  }
+
+  const [language, region, ...rest] = value.replace(/_/g, '-').split('-')
+  if (!language) {
+    return ''
+  }
+  const normalized = [
+    language.toLowerCase(),
+    region ? region.toUpperCase() : '',
+    ...rest,
+  ].filter(Boolean)
+  return normalized.join('-')
+}
+
 // FingerprintConfig → string[]
 export function serialize(config: FingerprintConfig): string[] {
   const args: string[] = []
@@ -125,6 +159,8 @@ export function serialize(config: FingerprintConfig): string[] {
   const locale = config.fingerprintLocale || config.lang
   if (config.lang) args.push(`--lang=${config.lang}`)
   if (locale) args.push(`--fingerprint-locale=${locale}`)
+  const acceptLanguage = config.acceptLanguage || defaultAcceptLanguage(locale)
+  if (acceptLanguage) args.push(`--fingerprint-accept-language=${acceptLanguage}`)
   if (config.timezone) {
     // 如果是 system，替换为实际系统时区
     const tz = config.timezone === 'system' ? getSystemTimezone() : config.timezone
@@ -230,6 +266,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       brand: 'Chrome',
       platform: 'windows',
       lang: 'zh-CN',
+      acceptLanguage: 'zh-CN,zh;q=0.9',
       timezone: 'Asia/Shanghai',
       resolution: '1920,1080',
       screenAvail: '1920,1040',
@@ -241,7 +278,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       audioNoise: true,
       webglVendor: 'Intel',
       webglRenderer: 'Intel(R) UHD Graphics 630',
-      fonts: 'Arial,Microsoft YaHei,SimSun,SimHei,Helvetica,Times New Roman',
+      fonts: 'Segoe UI,Calibri,Cambria Math,Consolas,Arial,Tahoma,Times New Roman,Verdana,Microsoft YaHei,SimSun,SimHei',
       webrtcPolicy: 'disable_non_proxied_udp',
       webrtcIP: 'auto',
       doNotTrack: false,
@@ -256,6 +293,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       brand: 'Chrome',
       platform: 'windows',
       lang: 'en-US',
+      acceptLanguage: 'en-US,en;q=0.9',
       timezone: 'America/New_York',
       resolution: '2560,1440',
       screenAvail: '2560,1400',
@@ -267,7 +305,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       audioNoise: true,
       webglVendor: 'NVIDIA',
       webglRenderer: 'NVIDIA GeForce RTX 3080',
-      fonts: 'Arial,Helvetica,Times New Roman,Courier New,Verdana',
+      fonts: 'Segoe UI,Calibri,Cambria Math,Consolas,Arial,Tahoma,Times New Roman,Verdana',
       webrtcPolicy: 'disable_non_proxied_udp',
       webrtcIP: 'auto',
       doNotTrack: false,
@@ -282,6 +320,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       brand: 'Chrome',
       platform: 'mac',
       lang: 'zh-CN',
+      acceptLanguage: 'zh-CN,zh;q=0.9',
       timezone: 'Asia/Shanghai',
       resolution: '2560,1440',
       screenAvail: '2560,1366',
@@ -293,7 +332,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       audioNoise: true,
       webglVendor: 'Apple',
       webglRenderer: 'Apple M2',
-      fonts: 'Arial,Helvetica,PingFang SC,Hiragino Sans GB,STHeiti,Times New Roman',
+      fonts: 'Helvetica Neue,PingFang SC,Menlo,Monaco,Arial,Helvetica,Apple Color Emoji,Times New Roman,Hiragino Sans GB',
       webrtcPolicy: 'disable_non_proxied_udp',
       webrtcIP: 'auto',
       doNotTrack: true,
@@ -308,6 +347,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       brand: 'Edge',
       platform: 'windows',
       lang: 'zh-CN',
+      acceptLanguage: 'zh-CN,zh;q=0.9',
       timezone: 'Asia/Shanghai',
       resolution: '1366,768',
       screenAvail: '1366,728',
@@ -319,7 +359,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       audioNoise: false,
       webglVendor: 'Intel',
       webglRenderer: 'Intel(R) HD Graphics 520',
-      fonts: 'Arial,Microsoft YaHei,Calibri,Segoe UI,Times New Roman',
+      fonts: 'Segoe UI,Calibri,Cambria Math,Consolas,Arial,Tahoma,Times New Roman,Verdana,Microsoft YaHei',
       webrtcPolicy: 'default_public_interface_only',
       webrtcIP: 'auto',
       doNotTrack: false,
@@ -334,6 +374,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       brand: 'Chrome',
       platform: 'windows',
       lang: 'en-US',
+      acceptLanguage: 'en-US,en;q=0.9',
       timezone: 'America/Los_Angeles',
       resolution: '1920,1080',
       screenAvail: '1920,1040',
@@ -345,7 +386,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       audioNoise: true,
       webglVendor: 'AMD',
       webglRenderer: 'AMD Radeon RX 6600',
-      fonts: 'Arial,Helvetica,Times New Roman,Courier New,Georgia',
+      fonts: 'Segoe UI,Calibri,Cambria Math,Consolas,Arial,Tahoma,Times New Roman,Verdana',
       webrtcPolicy: 'disable_non_proxied_udp',
       webrtcIP: 'auto',
       doNotTrack: false,
@@ -360,6 +401,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       brand: 'Chrome',
       platform: 'mac',
       lang: 'ja-JP',
+      acceptLanguage: 'ja-JP,ja;q=0.9',
       timezone: 'Asia/Tokyo',
       resolution: '1440,900',
       screenAvail: '1440,826',
@@ -371,7 +413,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       audioNoise: true,
       webglVendor: 'Apple',
       webglRenderer: 'Apple M1',
-      fonts: 'Arial,Helvetica,Hiragino Kaku Gothic ProN,Yu Gothic,Times New Roman',
+      fonts: 'Helvetica Neue,PingFang SC,Menlo,Monaco,Arial,Helvetica,Apple Color Emoji,Times New Roman,Hiragino Sans GB',
       webrtcPolicy: 'disable_non_proxied_udp',
       webrtcIP: 'auto',
       doNotTrack: true,
@@ -386,6 +428,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       brand: 'Chrome',
       platform: 'windows',
       lang: 'en-GB',
+      acceptLanguage: 'en-GB,en;q=0.9',
       timezone: 'Europe/London',
       resolution: '1920,1080',
       screenAvail: '1920,1040',
@@ -397,7 +440,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       audioNoise: true,
       webglVendor: 'Intel',
       webglRenderer: 'Intel(R) UHD Graphics 630',
-      fonts: 'Arial,Helvetica,Times New Roman,Courier New,Verdana',
+      fonts: 'Segoe UI,Calibri,Cambria Math,Consolas,Arial,Tahoma,Times New Roman,Verdana',
       webrtcPolicy: 'disable_non_proxied_udp',
       webrtcIP: 'auto',
       doNotTrack: false,
@@ -412,6 +455,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       brand: 'Chrome',
       platform: 'mac',
       lang: 'en-US',
+      acceptLanguage: 'en-US,en;q=0.9',
       timezone: 'America/New_York',
       resolution: '1440,900',
       colorDepth: '24',
@@ -421,7 +465,7 @@ export const FINGERPRINT_PRESETS: FingerprintPreset[] = [
       audioNoise: true,
       webglVendor: 'Apple',
       webglRenderer: 'Apple M1',
-      fonts: 'Arial,Helvetica,Times New Roman,Courier New,Georgia',
+      fonts: 'Helvetica Neue,PingFang SC,Menlo,Monaco,Arial,Helvetica,Apple Color Emoji,Times New Roman',
       webrtcPolicy: 'disable_non_proxied_udp',
       webrtcIP: 'auto',
       doNotTrack: false,

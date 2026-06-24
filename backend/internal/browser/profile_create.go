@@ -37,12 +37,13 @@ func (m *Manager) Create(input ProfileInput) (*Profile, error) {
 			coreId = defaultCore.CoreId
 		}
 	}
+	proxyFingerprintCtx := proxyFingerprintRegionContextFromResolvedProxy(resolvedProxy)
 	profile := &Profile{
 		ProfileId:       profileId,
 		ProfileName:     input.ProfileName,
 		UserDataDir:     userDataDir,
 		CoreId:          coreId,
-		FingerprintArgs: m.defaultFingerprintArgsForProfile(profileId, input.FingerprintArgs, nil, ""),
+		FingerprintArgs: m.defaultFingerprintArgsForProfileWithProxyRegion(profileId, input.FingerprintArgs, nil, "", proxyFingerprintCtx),
 		ProxyId:         resolvedProxy.ProxyId,
 		ProxyConfig:     resolvedProxy.ProxyConfig,
 		LaunchArgs:      input.LaunchArgs,

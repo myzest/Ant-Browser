@@ -143,7 +143,19 @@ func unknownFingerprintArgs(args []string) []string {
 		if before, _, ok := strings.Cut(key, "="); ok {
 			key = before
 		}
-		if _, ok := known[key]; !ok && strings.HasPrefix(key, "--") {
+		if canonical, ok := singleValueLaunchArgKey(key); ok {
+			key = canonical
+		}
+		if _, ok := known[key]; ok {
+			if !strings.Contains(strings.TrimSpace(arg), "=") && i+1 < len(args) {
+				next := strings.TrimSpace(args[i+1])
+				if next != "" && !strings.HasPrefix(next, "-") {
+					i++
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(key, "--") {
 			if !strings.Contains(strings.TrimSpace(arg), "=") && i+1 < len(args) {
 				next := strings.TrimSpace(args[i+1])
 				if next != "" && !strings.HasPrefix(next, "-") {
