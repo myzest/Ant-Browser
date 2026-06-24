@@ -144,7 +144,7 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 		return nil, err
 	}
 
-	effectiveProxy, exitIPCacheKey, acquiredXrayBridgeKey, releaseXrayBridge, err := a.resolveBrowserStartProxy(input, profile)
+	effectiveProxy, exitIPCacheKey, acquiredXrayBridgeKey, releaseXrayBridge, temporaryProxyRegionArgs, err := a.resolveBrowserStartProxy(input, profile)
 	if err != nil {
 		return nil, err
 	}
@@ -169,7 +169,7 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 		}
 	}
 
-	launchArgs := buildBrowserLaunchArgs(profile, userDataDir, assignedDebugPort, effectiveProxy, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, input.StartURLs, a.browserDefaultStartURLs(), input.SkipDefaultStartURLs, browserRestoreLastSession(a.config))
+	launchArgs := buildBrowserLaunchArgs(profile, userDataDir, assignedDebugPort, effectiveProxy, sanitizedProfileLaunchArgs, temporaryProxyRegionArgs, sanitizedExtraLaunchArgs, input.StartURLs, a.browserDefaultStartURLs(), input.SkipDefaultStartURLs, browserRestoreLastSession(a.config))
 	launchArgs = a.resolveAutoWebRTCIPLaunchArgWithCacheKey(input.ProfileID, launchArgs, effectiveProxy, exitIPCacheKey)
 
 	return &browserStartPlan{
@@ -198,8 +198,8 @@ func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *Brow
 	logManagedLaunchArgOverrides(log, input.ProfileID, "profile.launchArgs", managedProfileArgs)
 	logManagedLaunchArgOverrides(log, input.ProfileID, "start.extraLaunchArgs", managedExtraArgs)
 
-	proxyChanged := a.browserMgr.ApplyDefaults(profile)
-	if proxyChanged {
+	profileDefaultsChanged := a.browserMgr.ApplyDefaults(profile)
+	if profileDefaultsChanged {
 		_ = a.browserMgr.SaveProfiles()
 	}
 
@@ -250,7 +250,7 @@ func (a *App) prepareBrowserLaunchContext(input browserStartInput, profile *Brow
 	return sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs, chromeBinaryPath, userDataDir, nil
 }
 
-func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPort int, effectiveProxy string, sanitizedProfileLaunchArgs []string, sanitizedExtraLaunchArgs []string, startURLs []string, defaultStartURLs []string, skipDefaultStartURLs bool, restoreLastSession bool) []string {
+func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPort int, effectiveProxy string, sanitizedProfileLaunchArgs []string, temporaryProxyRegionArgs []string, sanitizedExtraLaunchArgs []string, startURLs []string, defaultStartURLs []string, skipDefaultStartURLs bool, restoreLastSession bool) []string {
 	args := []string{
 		fmt.Sprintf("--user-data-dir=%s", userDataDir),
 		"--disable-session-crashed-bubble",
@@ -280,7 +280,7 @@ func buildBrowserLaunchArgs(profile *BrowserProfile, userDataDir string, debugPo
 		args = append(args, fmt.Sprintf("--proxy-server=%s", effectiveProxy))
 	}
 
-	fingerprintArgs := mergeLaunchArgs(autoFingerprintArgs, profile.FingerprintArgs, sanitizedProfileLaunchArgs, sanitizedExtraLaunchArgs)
+	fingerprintArgs := mergeLaunchArgs(autoFingerprintArgs, profile.FingerprintArgs, sanitizedProfileLaunchArgs, temporaryProxyRegionArgs, sanitizedExtraLaunchArgs)
 	fingerprintArgs = ensureDefaultFingerprintNetworkArgs(fingerprintArgs, effectiveProxy)
 	args = append(args, fingerprintArgs...)
 	return appendLaunchTargets(args, startURLs, defaultStartURLs, skipDefaultStartURLs, restoreLastSession)

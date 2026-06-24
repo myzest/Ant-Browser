@@ -144,6 +144,7 @@ func TestDefaultFingerprintArgsForOS(t *testing.T) {
 		}
 		required := []string{
 			"--lang=zh-CN",
+			"--fingerprint-accept-language=zh-CN,zh;q=0.9",
 			"--fingerprint-locale=zh-CN",
 			"--timezone=Asia/Shanghai",
 			"--fingerprint-timezone=Asia/Shanghai",

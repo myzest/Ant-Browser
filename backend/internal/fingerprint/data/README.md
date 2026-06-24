@@ -16,6 +16,12 @@ The JSON files in this directory are curated for Ant-Browser and are not direct 
 - `screen.json`: screen resolution, color depth, and device pixel ratio distributions.
 - `webgl.json`: platform-oriented WebGL vendor and renderer allowlists.
 
+## UA Client Hints Boundary
+
+`client_hints.json` is a data-only capability skeleton. It contains Ant-Browser / Ant-curated UA-CH candidate data, but the current fingerprint implementation does not generate or apply runtime launch arguments from it.
+
+Runtime UA-CH spoofing requires a separate explicit implementation and verification that the Chromium core supports the required controls. Audit output that includes `navigator.userAgentData` is collection evidence for manual or future comparison, not proof that UA-CH has been spoofed.
+
 ## Maintenance Rules
 
 When updating this directory:

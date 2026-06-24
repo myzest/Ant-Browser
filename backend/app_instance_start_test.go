@@ -645,7 +645,7 @@ func TestBuildBrowserLaunchArgsOmitsDebugPortForManualStart(t *testing.T) {
 	t.Parallel()
 
 	profile := &BrowserProfile{ProfileId: "profile-manual", FingerprintArgs: []string{"--fingerprint=111"}}
-	got := buildBrowserLaunchArgs(profile, "/tmp/ant-profile", 0, "direct://", []string{"--disable-sync"}, nil, nil, nil, true, false)
+	got := buildBrowserLaunchArgs(profile, "/tmp/ant-profile", 0, "direct://", []string{"--disable-sync"}, nil, nil, nil, nil, true, false)
 
 	if containsLaunchArgPrefix(got, "--remote-debugging-port") {
 		t.Fatalf("manual launch should not include remote debugging port: %v", got)
@@ -659,7 +659,7 @@ func TestBuildBrowserLaunchArgsAddsLoopbackDebugAddressWhenDebugPortRequired(t *
 	t.Parallel()
 
 	profile := &BrowserProfile{ProfileId: "profile-debug", FingerprintArgs: []string{"--fingerprint=111"}}
-	got := buildBrowserLaunchArgs(profile, "/tmp/ant-profile", 9333, "direct://", nil, nil, nil, nil, true, false)
+	got := buildBrowserLaunchArgs(profile, "/tmp/ant-profile", 9333, "direct://", nil, nil, nil, nil, nil, true, false)
 
 	if !containsLaunchArg(got, "--remote-debugging-port=9333") {
 		t.Fatalf("debug launch should include remote debugging port: %v", got)
@@ -810,6 +810,264 @@ func containsLaunchArgPrefix(args []string, prefix string) bool {
 	return false
 }
 
+func launchArgValueForTest(args []string, want string) string {
+	want = strings.ToLower(strings.TrimSpace(want))
+	if canonical, ok := singleValueLaunchArgKey(want); ok {
+		want = canonical
+	}
+	for _, arg := range args {
+		key, ok := singleValueLaunchArgKey(arg)
+		if !ok || key != want {
+			continue
+		}
+		value, _ := launchArgValueAt([]string{arg}, 0)
+		return value
+	}
+	return ""
+}
+
+func newTemporaryProxyLaunchTestApp(t *testing.T, proxies []config.BrowserProxy, profile *BrowserProfile) *App {
+	t.Helper()
+
+	root := t.TempDir()
+	coreDir := filepath.Join(root, "chrome-core")
+	exePath := filepath.Join(coreDir, filepath.FromSlash(browser.CoreExecutableCandidates()[0]))
+	if err := os.MkdirAll(filepath.Dir(exePath), 0o755); err != nil {
+		t.Fatalf("创建测试内核目录失败: %v", err)
+	}
+	if err := os.WriteFile(exePath, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("写入测试内核失败: %v", err)
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.Browser.Cores = []config.BrowserCore{
+		{CoreId: "test-core", CoreName: "Test Core", CorePath: coreDir, IsDefault: true},
+	}
+	cfg.Browser.Proxies = proxies
+	cfg.Browser.DefaultStartURLs = nil
+	cfg.Browser.RestoreLastSession = true
+
+	app := NewApp(root)
+	app.config = cfg
+	app.browserMgr = browser.NewManager(cfg, root)
+	profile.CoreId = "test-core"
+	if profile.LaunchArgs == nil {
+		profile.LaunchArgs = []string{"--disable-sync"}
+	}
+	app.browserMgr.Profiles = map[string]*BrowserProfile{
+		profile.ProfileId: profile,
+	}
+	return app
+}
+
+func TestPrepareBrowserStartPlanLinksTemporaryProxyIDRegionFingerprintArgs(t *testing.T) {
+	original := resolveFingerprintExitIP
+	resolveFingerprintExitIP = func(proxyURL string, cacheKey string, timeout time.Duration) (string, error) {
+		return "203.0.113.88", nil
+	}
+	defer func() { resolveFingerprintExitIP = original }()
+
+	profile := &BrowserProfile{
+		ProfileId:       "profile-temp-proxy-region",
+		ProfileName:     "Temporary Proxy Region",
+		FingerprintArgs: []string{"--fingerprint=111", "--lang=zh-CN", "--fingerprint-locale=zh-CN", "--fingerprint-accept-language=zh-CN,zh;q=0.9", "--timezone=Asia/Shanghai", "--fingerprint-timezone=Asia/Shanghai", "--fingerprint-do-not-track=false"},
+		ProxyId:         "stored-proxy",
+		ProxyConfig:     "http://127.0.0.1:18080",
+	}
+	app := newTemporaryProxyLaunchTestApp(t, []config.BrowserProxy{
+		{ProxyId: "stored-proxy", ProxyName: "Stored", ProxyConfig: "http://127.0.0.1:18080", Country: "CN", Locale: "zh-CN", Timezone: "Asia/Shanghai"},
+		{ProxyId: "runtime-proxy", ProxyName: "Runtime", ProxyConfig: "http://127.0.0.1:28080", Country: "US", Locale: "en-US", Timezone: "America/Los_Angeles"},
+	}, profile)
+	input := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, false, "runtime-proxy", "")
+
+	plan, err := app.prepareBrowserStartPlan(input, profile)
+	if err != nil {
+		t.Fatalf("prepareBrowserStartPlan returned error: %v", err)
+	}
+	if plan.effectiveProxy != "http://127.0.0.1:28080" {
+		t.Fatalf("expected runtime proxy, got %q", plan.effectiveProxy)
+	}
+	for key, want := range map[string]string{
+		"--lang":                        "en-US",
+		"--fingerprint-locale":          "en-US",
+		"--fingerprint-accept-language": "en-US,en;q=0.9",
+		"--timezone":                    "America/Los_Angeles",
+		"--fingerprint-timezone":        "America/Los_Angeles",
+	} {
+		if got := launchArgValueForTest(plan.args, key); got != want {
+			t.Fatalf("temporary proxy region arg %s mismatch: got=%q want=%q args=%v", key, got, want, plan.args)
+		}
+	}
+}
+
+func TestPrepareBrowserStartPlanTemporaryProxyDoesNotPersistFingerprintArgs(t *testing.T) {
+	original := resolveFingerprintExitIP
+	resolveFingerprintExitIP = func(proxyURL string, cacheKey string, timeout time.Duration) (string, error) {
+		return "203.0.113.89", nil
+	}
+	defer func() { resolveFingerprintExitIP = original }()
+
+	originalFingerprintArgs := []string{"--fingerprint=222", "--lang=zh-CN", "--fingerprint-locale=zh-CN", "--fingerprint-accept-language=zh-CN,zh;q=0.9", "--timezone=Asia/Shanghai", "--fingerprint-timezone=Asia/Shanghai", "--fingerprint-do-not-track=false"}
+	profile := &BrowserProfile{
+		ProfileId:       "profile-temp-proxy-no-persist",
+		ProfileName:     "Temporary Proxy No Persist",
+		FingerprintArgs: append([]string{}, originalFingerprintArgs...),
+		ProxyId:         "stored-proxy",
+		ProxyConfig:     "http://127.0.0.1:18080",
+	}
+	app := newTemporaryProxyLaunchTestApp(t, []config.BrowserProxy{
+		{ProxyId: "stored-proxy", ProxyName: "Stored", ProxyConfig: "http://127.0.0.1:18080", Country: "CN"},
+		{ProxyId: "runtime-proxy", ProxyName: "Runtime", ProxyConfig: "http://127.0.0.1:28080", Country: "US"},
+	}, profile)
+	input := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, false, "runtime-proxy", "")
+
+	plan, err := app.prepareBrowserStartPlan(input, profile)
+	if err != nil {
+		t.Fatalf("prepareBrowserStartPlan returned error: %v", err)
+	}
+	if got := launchArgValueForTest(plan.args, "--lang"); got != "en-US" {
+		t.Fatalf("expected launch args to use temporary proxy region, got lang=%q args=%v", got, plan.args)
+	}
+	if !containsLaunchArg(profile.FingerprintArgs, "--fingerprint=222") {
+		t.Fatalf("profile fingerprint seed should be preserved while applying defaults, got=%v", profile.FingerprintArgs)
+	}
+	for _, want := range originalFingerprintArgs[1:] {
+		if !containsLaunchArg(profile.FingerprintArgs, want) {
+			t.Fatalf("stored profile fingerprint semantic %q should be preserved, got=%v", want, profile.FingerprintArgs)
+		}
+	}
+	for _, blocked := range []string{
+		"--lang=en-US",
+		"--fingerprint-locale=en-US",
+		"--fingerprint-accept-language=en-US,en;q=0.9",
+	} {
+		if containsLaunchArg(profile.FingerprintArgs, blocked) {
+			t.Fatalf("temporary proxy region should not persist %q into profile fingerprint args: %v", blocked, profile.FingerprintArgs)
+		}
+	}
+}
+
+func TestPrepareBrowserStartPlanExtraLaunchArgsOverrideTemporaryProxyRegion(t *testing.T) {
+	original := resolveFingerprintExitIP
+	resolveFingerprintExitIP = func(proxyURL string, cacheKey string, timeout time.Duration) (string, error) {
+		return "203.0.113.90", nil
+	}
+	defer func() { resolveFingerprintExitIP = original }()
+
+	profile := &BrowserProfile{
+		ProfileId:       "profile-temp-proxy-extra-wins",
+		ProfileName:     "Temporary Proxy Extra Wins",
+		FingerprintArgs: []string{"--fingerprint=333", "--lang=zh-CN", "--fingerprint-locale=zh-CN", "--fingerprint-accept-language=zh-CN,zh;q=0.9", "--timezone=Asia/Shanghai", "--fingerprint-timezone=Asia/Shanghai", "--fingerprint-do-not-track=false"},
+		ProxyId:         "stored-proxy",
+		ProxyConfig:     "http://127.0.0.1:18080",
+	}
+	app := newTemporaryProxyLaunchTestApp(t, []config.BrowserProxy{
+		{ProxyId: "stored-proxy", ProxyName: "Stored", ProxyConfig: "http://127.0.0.1:18080", Country: "CN"},
+		{ProxyId: "runtime-proxy", ProxyName: "Runtime", ProxyConfig: "http://127.0.0.1:28080", Country: "US", Locale: "en-US", Timezone: "America/New_York"},
+	}, profile)
+	extraArgs := []string{
+		"--lang=ja-JP",
+		"--fingerprint-locale=ja-JP",
+		"--accept-language=ja-JP,ja;q=0.9,en;q=0.8",
+		"--timezone=Asia/Tokyo",
+		"--fingerprint-timezone=Asia/Tokyo",
+	}
+	input := newBrowserStartInput(profile.ProfileId, extraArgs, nil, false, false, false, false, "runtime-proxy", "")
+
+	plan, err := app.prepareBrowserStartPlan(input, profile)
+	if err != nil {
+		t.Fatalf("prepareBrowserStartPlan returned error: %v", err)
+	}
+	for key, want := range map[string]string{
+		"--lang":                        "ja-JP",
+		"--fingerprint-locale":          "ja-JP",
+		"--fingerprint-accept-language": "ja-JP,ja;q=0.9,en;q=0.8",
+		"--timezone":                    "Asia/Tokyo",
+		"--fingerprint-timezone":        "Asia/Tokyo",
+	} {
+		if got := launchArgValueForTest(plan.args, key); got != want {
+			t.Fatalf("extra launch arg %s should win: got=%q want=%q args=%v", key, got, want, plan.args)
+		}
+	}
+}
+
+func TestPrepareBrowserStartPlanCustomTemporaryProxyConfigDoesNotInferRegion(t *testing.T) {
+	original := resolveFingerprintExitIP
+	resolveFingerprintExitIP = func(proxyURL string, cacheKey string, timeout time.Duration) (string, error) {
+		return "203.0.113.91", nil
+	}
+	defer func() { resolveFingerprintExitIP = original }()
+
+	profile := &BrowserProfile{
+		ProfileId:       "profile-temp-proxy-custom-no-region",
+		ProfileName:     "Temporary Proxy Custom No Region",
+		FingerprintArgs: []string{"--fingerprint=444", "--lang=zh-CN", "--fingerprint-locale=zh-CN", "--fingerprint-accept-language=zh-CN,zh;q=0.9", "--timezone=Asia/Shanghai", "--fingerprint-timezone=Asia/Shanghai", "--fingerprint-do-not-track=false"},
+		ProxyId:         "stored-proxy",
+		ProxyConfig:     "http://127.0.0.1:18080",
+	}
+	app := newTemporaryProxyLaunchTestApp(t, []config.BrowserProxy{
+		{ProxyId: "stored-proxy", ProxyName: "Stored", ProxyConfig: "http://127.0.0.1:18080", Country: "CN"},
+		{ProxyId: "runtime-proxy", ProxyName: "Runtime", ProxyConfig: "http://127.0.0.1:28080", Country: "US"},
+	}, profile)
+	input := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, false, "", "http://us-runtime.example:38080")
+
+	plan, err := app.prepareBrowserStartPlan(input, profile)
+	if err != nil {
+		t.Fatalf("prepareBrowserStartPlan returned error: %v", err)
+	}
+	if plan.effectiveProxy != "http://us-runtime.example:38080" {
+		t.Fatalf("expected custom temporary proxy config, got %q", plan.effectiveProxy)
+	}
+	for key, want := range map[string]string{
+		"--lang":                        "zh-CN",
+		"--fingerprint-locale":          "zh-CN",
+		"--fingerprint-accept-language": "zh-CN,zh;q=0.9",
+		"--timezone":                    "Asia/Shanghai",
+		"--fingerprint-timezone":        "Asia/Shanghai",
+	} {
+		if got := launchArgValueForTest(plan.args, key); got != want {
+			t.Fatalf("custom temporary proxy should not infer %s: got=%q want=%q args=%v", key, got, want, plan.args)
+		}
+	}
+}
+
+func TestPrepareBrowserStartPlanTemporaryProxyUsesIPHealthRegionCache(t *testing.T) {
+	original := resolveFingerprintExitIP
+	resolveFingerprintExitIP = func(proxyURL string, cacheKey string, timeout time.Duration) (string, error) {
+		return "203.0.113.92", nil
+	}
+	defer func() { resolveFingerprintExitIP = original }()
+
+	profile := &BrowserProfile{
+		ProfileId:       "profile-temp-proxy-ip-health",
+		ProfileName:     "Temporary Proxy IP Health",
+		FingerprintArgs: []string{"--fingerprint=555", "--lang=zh-CN", "--fingerprint-locale=zh-CN", "--fingerprint-accept-language=zh-CN,zh;q=0.9", "--timezone=Asia/Shanghai", "--fingerprint-timezone=Asia/Shanghai", "--fingerprint-do-not-track=false"},
+		ProxyId:         "stored-proxy",
+		ProxyConfig:     "http://127.0.0.1:18080",
+	}
+	app := newTemporaryProxyLaunchTestApp(t, []config.BrowserProxy{
+		{ProxyId: "stored-proxy", ProxyName: "Stored", ProxyConfig: "http://127.0.0.1:18080", Country: "CN"},
+		{ProxyId: "runtime-proxy", ProxyName: "Runtime", ProxyConfig: "http://127.0.0.1:28080", LastIPHealthJSON: `{"ok":true,"country":"JP","locale":"ja-JP","timezone":"Asia/Tokyo"}`},
+	}, profile)
+	input := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, false, "runtime-proxy", "")
+
+	plan, err := app.prepareBrowserStartPlan(input, profile)
+	if err != nil {
+		t.Fatalf("prepareBrowserStartPlan returned error: %v", err)
+	}
+	for key, want := range map[string]string{
+		"--lang":                        "ja-JP",
+		"--fingerprint-locale":          "ja-JP",
+		"--fingerprint-accept-language": "ja-JP,ja;q=0.9,en;q=0.8",
+		"--timezone":                    "Asia/Tokyo",
+		"--fingerprint-timezone":        "Asia/Tokyo",
+	} {
+		if got := launchArgValueForTest(plan.args, key); got != want {
+			t.Fatalf("ip health region arg %s mismatch: got=%q want=%q args=%v", key, got, want, plan.args)
+		}
+	}
+}
+
 func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *testing.T) {
 	t.Parallel()
 
@@ -829,7 +1087,7 @@ func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *tes
 	}
 	input := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, false, "runtime-proxy", "")
 
-	effectiveProxy, exitIPCacheKey, bridgeKey, releaseBridge, err := app.resolveBrowserStartProxy(input, profile)
+	effectiveProxy, exitIPCacheKey, bridgeKey, releaseBridge, temporaryProxyRegionArgs, err := app.resolveBrowserStartProxy(input, profile)
 	if err != nil {
 		t.Fatalf("resolveBrowserStartProxy returned error: %v", err)
 	}
@@ -842,12 +1100,15 @@ func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *tes
 	if bridgeKey != "" || releaseBridge {
 		t.Fatalf("plain HTTP proxy should not acquire bridge: key=%q release=%v", bridgeKey, releaseBridge)
 	}
+	if len(temporaryProxyRegionArgs) != 0 {
+		t.Fatalf("temporary proxy without region should not add region args: %v", temporaryProxyRegionArgs)
+	}
 	if profile.ProxyId != "stored-proxy" || profile.ProxyConfig != "http://127.0.0.1:18080" {
 		t.Fatalf("temporary proxy should not mutate profile: %+v", profile)
 	}
 
 	fallbackInput := newBrowserStartInput(profile.ProfileId, nil, nil, false, false, false, false, "missing-proxy", "http://127.0.0.1:38080")
-	effectiveProxy, exitIPCacheKey, bridgeKey, releaseBridge, err = app.resolveBrowserStartProxy(fallbackInput, profile)
+	effectiveProxy, exitIPCacheKey, bridgeKey, releaseBridge, temporaryProxyRegionArgs, err = app.resolveBrowserStartProxy(fallbackInput, profile)
 	if err != nil {
 		t.Fatalf("fallback temporary proxy returned error: %v", err)
 	}
@@ -859,6 +1120,9 @@ func TestResolveBrowserStartProxyUsesTemporaryProxyWithoutMutatingProfile(t *tes
 	}
 	if bridgeKey != "" || releaseBridge {
 		t.Fatalf("fallback HTTP proxy should not acquire bridge: key=%q release=%v", bridgeKey, releaseBridge)
+	}
+	if len(temporaryProxyRegionArgs) != 0 {
+		t.Fatalf("custom fallback proxy should not infer region args: %v", temporaryProxyRegionArgs)
 	}
 	if profile.ProxyId != "stored-proxy" || profile.ProxyConfig != "http://127.0.0.1:18080" {
 		t.Fatalf("fallback temporary proxy should not mutate profile: %+v", profile)

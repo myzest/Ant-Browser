@@ -20,6 +20,8 @@ These references are used for research and compatibility analysis. Unless a file
 
 The files under `backend/internal/fingerprint/data/` are Ant-Browser-maintained data files. They are not direct copies of Camoufox, CloakBrowser, BrowserForge, CLDR, GeoIP, or other third-party datasets unless a file-level notice says so.
 
+`backend/internal/fingerprint/data/client_hints.json` is a data-only UA Client Hints capability skeleton maintained from Ant-Browser / Ant-curated data. Its presence documents candidate UA-CH data only; Ant-Browser does not currently generate or apply runtime UA-CH launch arguments from this file. Runtime UA-CH spoofing requires a separate explicit implementation plus Chromium core support verification.
+
 When a future change vendors, derives from, or mechanically transforms third-party data or code, the change must add a file-level or adjacent notice that records:
 
 - Source URL

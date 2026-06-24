@@ -25,6 +25,12 @@ P0-D 阶段新增内置自动化脚本 `fingerprint-audit`，类型为 `playwrig
 
 最小离线采集可设置 `"localProbeOnly": true`，此时只生成 `local-probe.json` 与 `report.json`。检测站页面评分不解析、不作为 CI 阻断。
 
+## UA-CH 采集边界
+
+`fingerprint-audit` 会采集页面可见的 `navigator.userAgentData`，用于人工判读或后续与 profile / `client_hints.json` 数据比对。该采集只记录当前运行实例暴露出的 UA Client Hints，不代表 Ant-Browser 已经完成 UA-CH 伪装。
+
+当前 UA-CH 仍是 data-only capability skeleton：只提供 Ant 自行整理的候选数据模型，不生成、不应用运行时启动参数。真正的 runtime UA-CH 生效能力需要另一个明确实现，并经过 Chromium 内核支持与检测站验证。
+
 ## 检测站点
 
 - Fingerprint.com Playground: `https://demo.fingerprint.com/playground`

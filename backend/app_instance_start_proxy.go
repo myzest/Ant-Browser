@@ -1,15 +1,17 @@
 package backend
 
 import (
+	"ant-chrome/backend/internal/fingerprint"
 	"ant-chrome/backend/internal/logger"
 	"ant-chrome/backend/internal/proxy"
+	"encoding/json"
 	"fmt"
 	"strings"
 )
 
 const temporaryDirectProxyID = "__direct__"
 
-func (a *App) resolveBrowserStartProxy(input browserStartInput, profile *BrowserProfile) (string, string, string, bool, error) {
+func (a *App) resolveBrowserStartProxy(input browserStartInput, profile *BrowserProfile) (string, string, string, bool, []string, error) {
 	log := logger.New("Browser")
 	proxies := a.getLatestProxies()
 	profileID := input.ProfileID
@@ -19,11 +21,12 @@ func (a *App) resolveBrowserStartProxy(input browserStartInput, profile *Browser
 			logger.F("profile_id", profileID),
 			logger.F("proxy_id", profile.ProxyId),
 		)
-		return "direct://", "", "", false, nil
+		return "direct://", "", "", false, nil, nil
 	}
 
 	resolvedProxyID := strings.TrimSpace(profile.ProxyId)
 	resolvedProxyConfig := strings.TrimSpace(profile.ProxyConfig)
+	temporaryProxyRegionArgs := []string(nil)
 	usingTemporaryProxy := input.hasTemporaryProxy()
 	if usingTemporaryProxy {
 		var err error
@@ -37,8 +40,9 @@ func (a *App) resolveBrowserStartProxy(input browserStartInput, profile *Browser
 				logger.F("error", err.Error()),
 				logger.F("reason", startErr.Error()),
 			)
-			return "", "", "", false, startErr
+			return "", "", "", false, nil, startErr
 		}
+		temporaryProxyRegionArgs = temporaryProxyRegionLaunchArgs(resolveTemporaryProxyRegionContext(input, resolvedProxyID, resolvedProxyConfig, proxies))
 	} else if resolvedProxyID != "" {
 		for _, item := range proxies {
 			if strings.EqualFold(item.ProxyId, resolvedProxyID) {
@@ -67,7 +71,7 @@ func (a *App) resolveBrowserStartProxy(input browserStartInput, profile *Browser
 			logger.F("error", errorMsg),
 			logger.F("reason", startErr.Error()),
 		)
-		return "", "", "", false, startErr
+		return "", "", "", false, nil, startErr
 	}
 
 	exitIPCacheKey := browserStartProxyCacheKey(resolvedProxyID, resolvedProxyConfig)
@@ -80,10 +84,10 @@ func (a *App) resolveBrowserStartProxy(input browserStartInput, profile *Browser
 				logger.F("reason", startErr.Error()),
 			)
 			profile.LastError = startErr.Error()
-			return "", "", "", false, startErr
+			return "", "", "", false, nil, startErr
 		}
 		log.Info("sing-box 桥接成功", logger.F("socks_url", socksURL))
-		return socksURL, exitIPCacheKey, "", false, nil
+		return socksURL, exitIPCacheKey, "", false, temporaryProxyRegionArgs, nil
 	}
 
 	if proxy.RequiresBridge(resolvedProxyConfig, proxies, resolvedProxyID) || proxy.RequiresLocalProxyBridgeForBrowser(resolvedProxyConfig) {
@@ -95,13 +99,13 @@ func (a *App) resolveBrowserStartProxy(input browserStartInput, profile *Browser
 				logger.F("reason", startErr.Error()),
 			)
 			profile.LastError = startErr.Error()
-			return "", "", "", false, startErr
+			return "", "", "", false, nil, startErr
 		}
 		log.Info("xray 桥接成功", logger.F("socks_url", socksURL))
-		return socksURL, exitIPCacheKey, bridgeKey, bridgeKey != "", nil
+		return socksURL, exitIPCacheKey, bridgeKey, bridgeKey != "", temporaryProxyRegionArgs, nil
 	}
 
-	return resolvedProxyConfig, exitIPCacheKey, "", false, nil
+	return resolvedProxyConfig, exitIPCacheKey, "", false, temporaryProxyRegionArgs, nil
 }
 
 func resolveTemporaryBrowserStartProxy(proxyID string, proxyConfig string, proxies []BrowserProxy) (string, string, error) {
@@ -132,4 +136,101 @@ func browserStartProxyCacheKey(proxyID string, proxyConfig string) string {
 		return proxyID + "|" + proxyConfig
 	}
 	return proxyConfig
+}
+
+func resolveTemporaryProxyRegionContext(input browserStartInput, resolvedProxyID string, resolvedProxyConfig string, proxies []BrowserProxy) fingerprint.ValidationContext {
+	if !input.hasTemporaryProxy() {
+		return fingerprint.ValidationContext{}
+	}
+	if strings.EqualFold(strings.TrimSpace(resolvedProxyConfig), "direct://") {
+		return fingerprint.ValidationContext{}
+	}
+
+	for _, proxyID := range []string{resolvedProxyID, input.TemporaryProxyID} {
+		proxyID = strings.TrimSpace(proxyID)
+		if proxyID == "" || strings.EqualFold(proxyID, temporaryDirectProxyID) {
+			continue
+		}
+		for _, item := range proxies {
+			if strings.EqualFold(strings.TrimSpace(item.ProxyId), proxyID) {
+				return temporaryProxyRegionContextFromProxy(item)
+			}
+		}
+	}
+	for _, proxyConfig := range []string{resolvedProxyConfig, input.TemporaryProxyConfig} {
+		proxyConfig = strings.TrimSpace(proxyConfig)
+		if proxyConfig == "" || strings.EqualFold(proxyConfig, "direct://") {
+			continue
+		}
+		for _, item := range proxies {
+			if strings.EqualFold(strings.TrimSpace(item.ProxyConfig), proxyConfig) {
+				return temporaryProxyRegionContextFromProxy(item)
+			}
+		}
+	}
+	return fingerprint.ValidationContext{}
+}
+
+func temporaryProxyRegionContextFromProxy(item BrowserProxy) fingerprint.ValidationContext {
+	ctx := fingerprint.ValidationContext{
+		ProxyCountry:  strings.TrimSpace(item.Country),
+		ProxyLocale:   strings.TrimSpace(item.Locale),
+		ProxyTimezone: strings.TrimSpace(item.Timezone),
+	}
+	if cached, ok := temporaryProxyRegionContextFromIPHealthJSON(item.LastIPHealthJSON); ok {
+		ctx = mergeProxyRegionContext(ctx, cached)
+	}
+	if strings.TrimSpace(ctx.ProxyCountry) != "" || strings.TrimSpace(ctx.ProxyLocale) != "" || strings.TrimSpace(ctx.ProxyTimezone) != "" {
+		locale, timezone, country := fingerprint.RegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
+		ctx.ProxyCountry = country
+		if strings.TrimSpace(ctx.ProxyLocale) == "" {
+			ctx.ProxyLocale = locale
+		}
+		if strings.TrimSpace(ctx.ProxyTimezone) == "" {
+			ctx.ProxyTimezone = timezone
+		}
+	}
+	return ctx
+}
+
+func temporaryProxyRegionContextFromIPHealthJSON(raw string) (fingerprint.ValidationContext, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fingerprint.ValidationContext{}, false
+	}
+	var result ProxyIPHealthResult
+	if err := json.Unmarshal([]byte(raw), &result); err != nil || !result.Ok {
+		return fingerprint.ValidationContext{}, false
+	}
+	ctx := fingerprint.ValidationContext{
+		ProxyCountry:  strings.TrimSpace(result.Country),
+		ProxyLocale:   strings.TrimSpace(result.Locale),
+		ProxyTimezone: strings.TrimSpace(result.Timezone),
+	}
+	return ctx, ctx.ProxyCountry != "" || ctx.ProxyLocale != "" || ctx.ProxyTimezone != ""
+}
+
+func temporaryProxyRegionLaunchArgs(ctx fingerprint.ValidationContext) []string {
+	if strings.TrimSpace(ctx.ProxyCountry) == "" && strings.TrimSpace(ctx.ProxyLocale) == "" && strings.TrimSpace(ctx.ProxyTimezone) == "" {
+		return nil
+	}
+
+	locale, timezone, country := fingerprint.RegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
+	args := []string{}
+	if locale != "" {
+		args = append(args,
+			"--lang="+locale,
+			"--fingerprint-locale="+locale,
+		)
+		if acceptLanguage := fingerprint.AcceptLanguageDefaults(country, locale); acceptLanguage != "" {
+			args = append(args, "--fingerprint-accept-language="+acceptLanguage)
+		}
+	}
+	if timezone != "" {
+		args = append(args,
+			"--timezone="+timezone,
+			"--fingerprint-timezone="+timezone,
+		)
+	}
+	return args
 }
