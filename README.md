@@ -75,6 +75,10 @@ Ant Browser 适合以下场景：
 - 标签与检索：支持按标签、关键字、状态、代理、内核、分组进行筛选
 - 本地化存储：配置和实例数据保存在本地，适合长期使用和备份
 
+### 指纹数据边界
+
+`backend/internal/fingerprint/data/client_hints.json` 目前只是 Ant 自行整理的 UA Client Hints data-only skeleton，用来记录候选数据模型和后续比对依据。当前 Ant Browser 不会从该文件生成或应用 runtime UA-CH 启动参数；真正的 runtime UA-CH spoofing 需要单独实现，并先验证所用 Chromium core 是否支持对应控制能力。
+
 ## 界面预览
 
 ### 1. 控制台

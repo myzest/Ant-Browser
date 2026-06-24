@@ -97,6 +97,14 @@ curl -X POST http://127.0.0.1:19876/api/launch \\
   }'
 \`\`\`
 
+### 一次性代理与地区指纹
+
+\`POST /api/launch\` 可以通过 \`proxyId\` 或 \`proxyConfig\` 指定本次启动使用的代理，这两个字段只影响本次启动，不会覆盖实例保存的代理配置。
+
+当一次性 \`proxyId\` 命中代理池，或一次性 \`proxyConfig\` 与代理池节点配置匹配时，如果该节点带有 country / locale / timezone，或最近的 IP 健康检测缓存里有可用地区信息，本次 launch 会临时注入 \`--lang\`、\`--fingerprint-locale\`、\`--fingerprint-accept-language\`、\`--timezone\` 和 \`--fingerprint-timezone\`。这些参数不会写回 \`profile.FingerprintArgs\`。
+
+\`launchArgs\` 显式传入的语言、时区和 accept-language 优先级最高；纯自定义 \`proxyConfig\` 未命中代理池节点时，不会根据代理地址猜测地区。
+
 ## 启动成功响应
 
 \`\`\`json
@@ -122,10 +130,18 @@ curl -X POST http://127.0.0.1:19876/api/launch \\
 launchCode 冲突 -> 409
 PUT 是整份更新
 运行中的实例不能直接 DELETE
+已运行实例不会因再次 launch / session 重新应用 fingerprint 或 profile 代理
+POST launch / session 中传入的一次性代理也不会作用于已运行进程
+如需应用新的 fingerprint / profile proxy / temporary proxy，先 stop 再重新 launch / session
+运行中实例需要打开新窗口时，只会向已有进程传递 user-data-dir、launchArgs 和 URL
 matchMode=all 只在 POST /api/launch 可用
 proxyId 和 proxyConfig 同时传 -> 优先 proxyId
 proxyId 无效 + proxyConfig 非空 -> 使用 proxyConfig
 proxyId 无效 + proxyConfig 为空 -> 400
+一次性 proxyId / proxyConfig 只影响本次启动，不覆盖实例原代理
+一次性代理命中代理池且有地区信息 -> 本次 launch 临时联动语言 / 时区 / accept-language
+extra launchArgs 显式语言 / 时区 / accept-language -> 优先于临时代理地区
+纯自定义 proxyConfig 未命中代理池 -> 不猜地区
 \`\`\`
 `
 

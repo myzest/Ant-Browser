@@ -259,6 +259,7 @@
 - 覆盖 `navigator.userAgentData`。
 - 生成 `brands`、`fullVersionList`、`platform`、`platformVersion`、`architecture`、`bitness`、`mobile`。
 - 与 UA、Chromium 版本、OS、brand 一致。
+- 现有 `client_hints.json` 仅是 Ant 自行整理的 data-only skeleton，不会生成或应用 runtime UA-CH 参数；本任务需要单独实现并验证 Chromium core 支持。
 
 验收：
 

@@ -135,6 +135,12 @@ func (a *App) markProfileStoppedLocked(profileId string, profile *BrowserProfile
 	}
 }
 
+// openBrowserWindowForRunningProfile only asks the already-running browser
+// process to open another window. Chrome ignores most process startup flags
+// after the profile process exists, so this path intentionally does not
+// rebuild or reapply profile fingerprint, profile proxy, or temporary proxy
+// settings. Stop the profile before starting it when those settings must
+// change for the browser process.
 func (a *App) openBrowserWindowForRunningProfile(profile *BrowserProfile, extraLaunchArgs []string, startURLs []string) error {
 	chromeBinaryPath, err := a.browserMgr.ResolveChromeBinary(profile)
 	if err != nil {

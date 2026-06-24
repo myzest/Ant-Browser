@@ -432,7 +432,9 @@ export const STRUCTURED_API_ENDPOINT_DOCS: StructuredApiEndpointDoc[] = [
       { code: '200', description: '启动成功。' },
       { code: '404', description: 'launchCode 不存在。' },
     ],
-    notes: [],
+    notes: [
+      '如果实例已经在运行，本接口只复用已有进程，不会重新应用 profile fingerprint 或 profile 代理；如需应用新的 fingerprint/proxy，请先 stop 再重新 launch。',
+    ],
   },
   {
     id: 'api-launch-body-detail',
@@ -454,6 +456,8 @@ export const STRUCTURED_API_ENDPOINT_DOCS: StructuredApiEndpointDoc[] = [
       { name: 'launchArgs', type: 'string[]', required: false, location: 'Body', description: '本次启动的临时附加参数。' },
       { name: 'startUrls', type: 'string[]', required: false, location: 'Body', description: '本次启动后额外打开的网址。' },
       { name: 'skipDefaultStartUrls', type: 'boolean', required: false, location: 'Body', description: '是否跳过实例默认启动 URL。' },
+      { name: 'proxyId', type: 'string', required: false, location: 'Body', description: '本次启动临时使用的代理池节点，不覆盖实例原代理。' },
+      { name: 'proxyConfig', type: 'string', required: false, location: 'Body', description: '本次启动临时使用的代理配置；命中代理池节点时才联动地区指纹。' },
     ],
     requestExample: {
       language: 'bash',
@@ -489,6 +493,11 @@ export const STRUCTURED_API_ENDPOINT_DOCS: StructuredApiEndpointDoc[] = [
       'selector 为空且没有任何兼容顶层选择字段时返回 400。',
       'matchMode=all 只在这个接口可用。',
       'proxyId / proxyConfig 只影响本次启动，不覆盖实例原代理。',
+      '一次性 proxyId 命中代理池，或 proxyConfig 与代理池节点配置匹配，且节点或 IP 健康缓存有 country / locale / timezone 时，本次 launch 会临时注入语言、时区和 accept-language 指纹参数。',
+      '临时地区参数不会写回 profile.FingerprintArgs；launchArgs 显式传入的语言、时区和 accept-language 优先。',
+      '纯自定义 proxyConfig 未命中代理池节点时，不根据代理地址猜测地区。',
+      '如果命中的实例已经在运行，本接口只复用已有进程；带 startUrls 时最多打开新窗口并传递 user-data-dir、launchArgs 和 URL，不会重新应用 profile fingerprint、profile 代理或一次性代理。',
+      '如需应用新的 fingerprint/proxy/temporary proxy，请先 stop 再重新 launch。',
     ],
   },
   {
@@ -547,6 +556,8 @@ export const STRUCTURED_API_ENDPOINT_DOCS: StructuredApiEndpointDoc[] = [
       { name: 'startUrls', type: 'string[]', required: false, location: 'Body', description: '本次启动时额外打开的网址。' },
       { name: 'skipDefaultStartUrls', type: 'boolean', required: false, location: 'Body', description: '是否跳过实例默认启动 URL。' },
       { name: 'launchArgs', type: 'string[]', required: false, location: 'Body', description: '本次启动时临时附加的启动参数。' },
+      { name: 'proxyId', type: 'string', required: false, location: 'Body', description: '本次启动临时使用的代理池节点，不覆盖实例原代理。' },
+      { name: 'proxyConfig', type: 'string', required: false, location: 'Body', description: '本次启动临时使用的代理配置；命中代理池节点时才联动地区指纹。' },
     ],
     requestExample: {
       language: 'bash',
@@ -586,6 +597,8 @@ export const STRUCTURED_API_ENDPOINT_DOCS: StructuredApiEndpointDoc[] = [
       'selector 为空且没有任何兼容顶层选择字段时返回 400。',
       '200 表示 ready，可直接接管。',
       '202 表示未 ready，需要重试。',
+      'proxyId / proxyConfig 与 launchArgs 的本次启动语义同 POST /api/launch：不持久化代理或 profile.FingerprintArgs，且 launchArgs 显式语言、时区和 accept-language 优先。',
+      '如果实例已经在运行，session 只复用已有进程，不会重新应用 profile fingerprint、profile 代理或一次性代理；如需应用新的 fingerprint/proxy，请先 stop 再重新 launch/session。',
     ],
   },
   {

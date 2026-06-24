@@ -149,6 +149,7 @@ func run(opts options) (*recoveryReport, error) {
 	if err != nil {
 		return nil, fmt.Errorf("load config: %w", err)
 	}
+	fingerprintMgr := browser.NewManager(cfg, appRoot)
 
 	dbPath := apppath.Resolve(appRoot, cfg.Database.SQLite.Path)
 	userDataRoot := apppath.Resolve(appRoot, cfg.Browser.UserDataRoot)
@@ -314,7 +315,7 @@ func run(opts options) (*recoveryReport, error) {
 				ProfileName:     profileName,
 				UserDataDir:     registeredUserDataDir,
 				CoreId:          selectedCore.CoreID,
-				FingerprintArgs: append([]string{}, cfg.Browser.DefaultFingerprintArgs...),
+				FingerprintArgs: fingerprintMgr.DefaultFingerprintArgsForProfile(profileID, nil, cfg.Browser.DefaultFingerprintArgs, ""),
 				ProxyId:         "",
 				ProxyConfig:     "",
 				LaunchArgs:      append([]string{}, cfg.Browser.DefaultLaunchArgs...),

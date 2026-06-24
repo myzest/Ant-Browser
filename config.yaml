@@ -41,6 +41,27 @@ browser:
     default_fingerprint_args:
         - --fingerprint-brand=Chrome
         - --fingerprint-platform=windows
+        - --lang=zh-CN
+        - --fingerprint-accept-language=zh-CN,zh;q=0.9
+        - --fingerprint-locale=zh-CN
+        - --timezone=Asia/Shanghai
+        - --fingerprint-timezone=Asia/Shanghai
+        - --window-size=1920,1080
+        - --fingerprint-screen-avail=1920,1040
+        - --fingerprint-device-pixel-ratio=1
+        - --fingerprint-color-depth=24
+        - --fingerprint-hardware-concurrency=8
+        - --fingerprint-device-memory=8
+        - --fingerprint-canvas-noise=true
+        - --fingerprint-audio-noise=true
+        - --fingerprint-webgl-vendor=Intel
+        - --fingerprint-webgl-renderer=Intel(R) UHD Graphics 630
+        - --fingerprint-fonts=Arial,Microsoft YaHei,SimSun,SimHei,Helvetica,Times New Roman
+        - --webrtc-ip-handling-policy=disable_non_proxied_udp
+        - --fingerprint-webrtc-ip=auto
+        - --fingerprint-do-not-track=false
+        - --fingerprint-touch-points=0
+        - --fingerprint-media-devices=1,1,1
     default_launch_args:
         - --disable-sync
         - --no-first-run

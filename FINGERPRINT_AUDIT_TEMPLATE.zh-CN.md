@@ -29,7 +29,7 @@ P0-D 阶段新增内置自动化脚本 `fingerprint-audit`，类型为 `playwrig
 
 `fingerprint-audit` 会采集页面可见的 `navigator.userAgentData`，用于人工判读或后续与 profile / `client_hints.json` 数据比对。该采集只记录当前运行实例暴露出的 UA Client Hints，不代表 Ant-Browser 已经完成 UA-CH 伪装。
 
-当前 UA-CH 仍是 data-only capability skeleton：只提供 Ant 自行整理的候选数据模型，不生成、不应用运行时启动参数。真正的 runtime UA-CH 生效能力需要另一个明确实现，并经过 Chromium 内核支持与检测站验证。
+当前 UA-CH 仍是 data-only capability skeleton：`client_hints.json` 只保存 Ant 自行整理的候选数据模型，不是运行时配置源，也不会生成或应用 UA-CH 启动参数。真正的 runtime UA-CH spoofing 需要单独实现，并经过 Chromium core 支持能力与检测站验证。
 
 ## 检测站点
 

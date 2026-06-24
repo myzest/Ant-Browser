@@ -105,6 +105,8 @@ CloakBrowser 是 Chromium 路线，参考价值更贴近 Ant-Browser：
 - 增加 Chromium UA / User-Agent Client Hints 一致性生成。
 - 检查 `fingerprint-chromium` 是否已有相关参数；没有则进入内核 patch 需求。
 
+现状边界：`backend/internal/fingerprint/data/client_hints.json` 仍只是 Ant 自行整理的 data-only skeleton，不会生成或应用 runtime UA-CH 参数；真正生效需要单独实现并验证 Chromium core 支持。
+
 ### 4.2 OS 字体库
 
 Camoufox 字体库值得重点吸收：
