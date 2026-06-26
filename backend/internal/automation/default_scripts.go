@@ -818,6 +818,10 @@ module.exports.run = async ({ launch, connect, selector, params, log, artifact }
   "localProbeOnly": false,
   "captureScreenshot": true,
   "saveHtml": true,
+  "enableHeaderEcho": true,
+  "headerEchoUrl": "https://httpbin.org/headers",
+  "probePersistStorage": false,
+  "webrtcProbeTimeoutMs": 3500,
   "waitAfterLoadMs": 5000,
   "timeoutMs": 120000
 }`,
@@ -864,6 +868,11 @@ function normalizeBool(value, fallback) {
     }
   }
   return fallback
+}
+
+function normalizeString(value, fallback) {
+  const text = String(value === undefined || value === null ? '' : value).trim()
+  return text || fallback
 }
 
 function normalizeDetectorEntries(value) {
@@ -917,6 +926,18 @@ function normalizeDetectorEntries(value) {
   return result
 }
 
+function normalizeHeaderEchoUrl(value) {
+  const raw = normalizeString(value, 'https://httpbin.org/headers')
+  if (!/^https?:\/\//i.test(raw)) {
+    return ''
+  }
+  try {
+    return new URL(raw).toString()
+  } catch {
+    return ''
+  }
+}
+
 function writeJSON(filePath, value) {
   fs.writeFileSync(filePath, JSON.stringify(value, null, 2) + '\n', 'utf8')
 }
@@ -931,13 +952,87 @@ function safeFilePart(value, fallback) {
     .slice(0, 80) || String(fallback || 'item')
 }
 
-async function collectLocalProbe(page) {
-  return page.evaluate(async function () {
+async function collectHeaderEcho(page, echoUrl, timeout) {
+  if (!echoUrl) {
+    return { enabled: false, error: 'headerEchoUrl is empty' }
+  }
+
+  const startedAt = Date.now()
+  const result = {
+    enabled: true,
+    url: echoUrl,
+    finalUrl: '',
+    status: 0,
+    requestHeaders: {},
+    responseHeaders: {},
+    echoedHeaders: {},
+    nextHopProtocol: '',
+    durationMs: 0,
+    error: '',
+  }
+
+  const handler = function (request) {
+    if (Object.keys(result.requestHeaders).length > 0 || request.resourceType() !== 'document') {
+      return
+    }
+    result.requestHeaders = request.headers()
+  }
+
+  page.on('request', handler)
+  try {
+    const response = await page.goto(echoUrl, { waitUntil: 'domcontentloaded', timeout })
+    result.finalUrl = page.url()
+    if (response) {
+      result.status = response.status()
+      result.responseHeaders = response.headers()
+    }
+    const text = await page.locator('body').innerText({ timeout: Math.min(timeout, 5000) }).catch(async function () {
+      return await page.content()
+    })
+    try {
+      const parsed = JSON.parse(text)
+      if (parsed && parsed.headers && typeof parsed.headers === 'object') {
+        result.echoedHeaders = parsed.headers
+      } else if (parsed && typeof parsed === 'object') {
+        result.echoedHeaders = parsed
+      }
+    } catch {}
+    result.nextHopProtocol = await page.evaluate(function (targetUrl) {
+      const nav = performance.getEntriesByType('navigation')[0]
+      if (nav && nav.nextHopProtocol) {
+        return nav.nextHopProtocol
+      }
+      const resources = performance.getEntriesByName(targetUrl)
+      return resources && resources[0] && resources[0].nextHopProtocol ? resources[0].nextHopProtocol : ''
+    }, result.finalUrl).catch(function () { return '' })
+  } catch (error) {
+    result.error = error && error.message ? error.message : String(error)
+  } finally {
+    result.durationMs = Date.now() - startedAt
+    page.off('request', handler)
+  }
+
+  return result
+}
+
+async function collectLocalProbe(page, options) {
+  return page.evaluate(async function (options) {
     const safe = function (fn, fallback) {
       try {
         return fn()
       } catch (error) {
         return fallback
+      }
+    }
+
+    const safeAsync = async function (fn, fallback) {
+      try {
+        return await fn()
+      } catch (error) {
+        if (fallback && typeof fallback === 'object') {
+          return Object.assign({}, fallback, { error: error && error.message ? error.message : String(error) })
+        }
+        return { error: error && error.message ? error.message : String(error) }
       }
     }
 
@@ -961,6 +1056,36 @@ async function collectLocalProbe(page) {
           enabledPlugin: String(item && item.enabledPlugin && item.enabledPlugin.name || ''),
         }
       })
+    }
+
+    const parseIceCandidate = function (candidate) {
+      const raw = String(candidate && candidate.candidate || candidate || '')
+      const parts = raw.split(/\s+/)
+      const typIndex = parts.indexOf('typ')
+      const type = typIndex >= 0 && parts[typIndex + 1] ? parts[typIndex + 1] : ''
+      const address = parts.length > 4 ? parts[4] : ''
+      const ipPattern = /^(?:\d{1,3}\.){3}\d{1,3}$|^[0-9a-f:]+$/i
+      return {
+        raw,
+        type,
+        address,
+        port: parts.length > 5 ? parts[5] : '',
+        protocol: parts.length > 2 ? parts[2].toLowerCase() : '',
+        isMDNS: /\.local$/i.test(address),
+        isIP: ipPattern.test(address),
+      }
+    }
+
+    const isPrivateIP = function (ip) {
+      if (!/^(?:\d{1,3}\.){3}\d{1,3}$/.test(ip)) {
+        return /^(fc|fd|fe80:)/i.test(ip) || ip === '::1'
+      }
+      const parts = ip.split('.').map(function (item) { return Number(item) })
+      return parts[0] === 10 ||
+        (parts[0] === 172 && parts[1] >= 16 && parts[1] <= 31) ||
+        (parts[0] === 192 && parts[1] === 168) ||
+        parts[0] === 127 ||
+        (parts[0] === 169 && parts[1] === 254)
     }
 
     const getUserAgentData = async function () {
@@ -992,17 +1117,18 @@ async function collectLocalProbe(page) {
       }
     }
 
-    const getWebGL = function () {
+    const getWebGL = function (contextVersion) {
       const canvas = document.createElement('canvas')
-      const gl =
-        canvas.getContext('webgl') ||
-        canvas.getContext('experimental-webgl')
+      const gl = contextVersion === 2
+        ? canvas.getContext('webgl2')
+        : (canvas.getContext('webgl') || canvas.getContext('experimental-webgl'))
       if (!gl) {
-        return { supported: false }
+        return { supported: false, context: contextVersion === 2 ? 'webgl2' : 'webgl' }
       }
       const debugInfo = safe(function () { return gl.getExtension('WEBGL_debug_renderer_info') }, null)
       return {
         supported: true,
+        context: contextVersion === 2 ? 'webgl2' : 'webgl',
         vendor: debugInfo ? safe(function () { return String(gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL) || '') }, '') : safe(function () { return String(gl.getParameter(gl.VENDOR) || '') }, ''),
         renderer: debugInfo ? safe(function () { return String(gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL) || '') }, '') : safe(function () { return String(gl.getParameter(gl.RENDERER) || '') }, ''),
         version: safe(function () { return String(gl.getParameter(gl.VERSION) || '') }, ''),
@@ -1018,21 +1144,274 @@ async function collectLocalProbe(page) {
       }
     }
 
-    const getStorageEstimate = async function () {
-      if (!navigator.storage || typeof navigator.storage.estimate !== 'function') {
-        return null
+    const getWebGPU = async function () {
+      if (!navigator.gpu) {
+        return { supported: false, reason: 'navigator.gpu missing' }
       }
-      try {
-        return await navigator.storage.estimate()
-      } catch (error) {
-        return { error: error && error.message ? error.message : String(error) }
+      return safeAsync(async function () {
+        const adapter = await navigator.gpu.requestAdapter()
+        if (!adapter) {
+          return { supported: false, reason: 'requestAdapter returned null' }
+        }
+        let adapterInfo = null
+        if (typeof adapter.requestAdapterInfo === 'function') {
+          adapterInfo = await adapter.requestAdapterInfo().catch(function () { return null })
+        } else if (adapter.info) {
+          adapterInfo = adapter.info
+        }
+        return {
+          supported: true,
+          features: safe(function () { return Array.prototype.slice.call(adapter.features || []) }, []),
+          limits: safe(function () { return Object.assign({}, adapter.limits || {}) }, {}),
+          adapterInfo,
+        }
+      }, { supported: true })
+    }
+
+    const testIndexedDB = async function () {
+      if (!window.indexedDB) {
+        return { supported: false, ok: false }
+      }
+      return new Promise(function (resolve) {
+        const name = 'ant_fingerprint_audit_' + Date.now()
+        let settled = false
+        const done = function (value) {
+          if (settled) {
+            return
+          }
+          settled = true
+          resolve(value)
+        }
+        const timer = setTimeout(function () { done({ supported: true, ok: false, error: 'timeout' }) }, 2500)
+        const request = indexedDB.open(name, 1)
+        request.onerror = function () {
+          clearTimeout(timer)
+          done({ supported: true, ok: false, error: request.error ? request.error.message : 'open failed' })
+        }
+        request.onupgradeneeded = function () {
+          request.result.createObjectStore('items')
+        }
+        request.onsuccess = function () {
+          const db = request.result
+          db.close()
+          indexedDB.deleteDatabase(name)
+          clearTimeout(timer)
+          done({ supported: true, ok: true })
+        }
+      })
+    }
+
+    const getStorage = async function () {
+      const hasStorageManager = safe(function () { return Boolean(navigator.storage) }, false)
+      const hasLocalStorage = safe(function () { return Boolean(window.localStorage) }, false)
+      const hasCacheStorage = safe(function () { return Boolean(window.caches) }, false)
+      const result = {
+        estimate: null,
+        persisted: null,
+        persistSupported: safe(function () { return Boolean(navigator.storage && typeof navigator.storage.persist === 'function') }, false),
+        persistAttempted: Boolean(options && options.probePersistStorage),
+        persistResult: null,
+        bucketsSupported: safe(function () { return Boolean(navigator.storageBuckets) }, false),
+        localStorage: { supported: hasLocalStorage, ok: false },
+        indexedDB: null,
+        cacheStorage: { supported: hasCacheStorage, ok: false },
+        serviceWorker: { supported: safe(function () { return Boolean(navigator.serviceWorker) }, false) },
+      }
+      if (hasStorageManager && typeof navigator.storage.estimate === 'function') {
+        result.estimate = await safeAsync(async function () { return await navigator.storage.estimate() }, {})
+      }
+      if (hasStorageManager && typeof navigator.storage.persisted === 'function') {
+        result.persisted = await safeAsync(async function () { return await navigator.storage.persisted() }, null)
+      }
+      if (result.persistAttempted && hasStorageManager && typeof navigator.storage.persist === 'function') {
+        result.persistResult = await safeAsync(async function () { return await navigator.storage.persist() }, null)
+      }
+      result.localStorage = safe(function () {
+        const key = 'ant_fingerprint_audit'
+        localStorage.setItem(key, '1')
+        const ok = localStorage.getItem(key) === '1'
+        localStorage.removeItem(key)
+        return { supported: true, ok }
+      }, { supported: hasLocalStorage, ok: false })
+      result.indexedDB = await testIndexedDB()
+      if (hasCacheStorage) {
+        result.cacheStorage = await safeAsync(async function () {
+          const key = 'ant-fingerprint-audit-' + Date.now()
+          await caches.open(key)
+          await caches.delete(key)
+          return { supported: true, ok: true }
+        }, { supported: true, ok: false })
+      }
+      return result
+    }
+
+    const getFonts = function () {
+      const candidates = [
+        'Arial',
+        'Calibri',
+        'Cambria',
+        'Consolas',
+        'Courier New',
+        'Georgia',
+        'Helvetica Neue',
+        'Menlo',
+        'Microsoft YaHei',
+        'PingFang SC',
+        'Roboto',
+        'San Francisco',
+        'SimSun',
+        'Times New Roman',
+      ]
+      const canvas = document.createElement('canvas')
+      const ctx = canvas.getContext('2d')
+      if (!ctx) {
+        return { method: 'canvas-text-metrics', candidates, available: [], error: '2d context missing' }
+      }
+      const baseFonts = ['monospace', 'sans-serif', 'serif']
+      const base = {}
+      for (const baseFont of baseFonts) {
+        ctx.font = '72px ' + baseFont
+        base[baseFont] = ctx.measureText('mmmmmmmmmmlli').width
+      }
+      const available = []
+      for (const font of candidates) {
+        let found = false
+        for (const baseFont of baseFonts) {
+          ctx.font = '72px "' + font + '", ' + baseFont
+          if (ctx.measureText('mmmmmmmmmmlli').width !== base[baseFont]) {
+            found = true
+            break
+          }
+        }
+        if (found) {
+          available.push(font)
+        }
+      }
+      return { method: 'canvas-text-metrics', candidates, available }
+    }
+
+    const getPluginsWidevine = async function () {
+      const plugins = serializePluginArray(navigator.plugins)
+      const mimeTypes = serializeMimeTypeArray(navigator.mimeTypes)
+      const widevine = { supported: false, error: '' }
+      if (typeof navigator.requestMediaKeySystemAccess === 'function') {
+        try {
+          const access = await navigator.requestMediaKeySystemAccess('com.widevine.alpha', [{
+            initDataTypes: ['cenc'],
+            audioCapabilities: [{ contentType: 'audio/mp4; codecs="mp4a.40.2"' }],
+            videoCapabilities: [{ contentType: 'video/mp4; codecs="avc1.42E01E"' }],
+          }])
+          widevine.supported = Boolean(access)
+          widevine.keySystem = access && access.keySystem ? access.keySystem : 'com.widevine.alpha'
+        } catch (error) {
+          widevine.error = error && error.message ? error.message : String(error)
+        }
+      } else {
+        widevine.error = 'requestMediaKeySystemAccess missing'
+      }
+      return {
+        plugins,
+        mimeTypes,
+        pdfViewerEnabled: safe(function () { return navigator.pdfViewerEnabled }, null),
+        pdfPluginNames: plugins.filter(function (item) { return /pdf/i.test(item.name + ' ' + item.description) }).map(function (item) { return item.name }),
+        widevine,
       }
     }
 
+    const queryPermission = async function (name) {
+      if (!navigator.permissions || typeof navigator.permissions.query !== 'function') {
+        return { supported: false }
+      }
+      try {
+        const status = await navigator.permissions.query({ name })
+        return { supported: true, state: status && status.state ? status.state : '' }
+      } catch (error) {
+        return { supported: true, error: error && error.message ? error.message : String(error) }
+      }
+    }
+
+    const getGeolocationPermissions = async function () {
+      return {
+        geolocation: {
+          supported: Boolean(navigator.geolocation),
+          permission: await queryPermission('geolocation'),
+        },
+        permissions: {
+          notifications: await queryPermission('notifications'),
+          camera: await queryPermission('camera'),
+          microphone: await queryPermission('microphone'),
+        },
+      }
+    }
+
+    const getWebRTC = async function () {
+      if (!window.RTCPeerConnection) {
+        return { supported: false, candidates: [], error: 'RTCPeerConnection missing' }
+      }
+      const timeoutMs = Math.max(500, Math.min(Number(options && options.webrtcProbeTimeoutMs) || 3500, 15000))
+      return new Promise(async function (resolve) {
+        const candidates = []
+        let pc = null
+        let settled = false
+        const finish = function (error) {
+          if (settled) {
+            return
+          }
+          settled = true
+          if (pc) {
+            pc.close()
+          }
+          const parsed = candidates.map(parseIceCandidate)
+          const ips = Array.from(new Set(parsed.filter(function (item) { return item.isIP }).map(function (item) { return item.address })))
+          const mdnsHostnames = Array.from(new Set(parsed.filter(function (item) { return item.isMDNS }).map(function (item) { return item.address })))
+          resolve({
+            supported: true,
+            iceGatheringState: pc ? pc.iceGatheringState : '',
+            candidates: parsed,
+            candidateTypes: Array.from(new Set(parsed.map(function (item) { return item.type }).filter(Boolean))),
+            ips,
+            privateIPs: ips.filter(isPrivateIP),
+            publicIPs: ips.filter(function (ip) { return !isPrivateIP(ip) }),
+            hostIPs: ips.filter(function (ip) {
+              return parsed.some(function (item) { return item.address === ip && item.type === 'host' })
+            }),
+            srflxIPs: ips.filter(function (ip) {
+              return parsed.some(function (item) { return item.address === ip && item.type === 'srflx' })
+            }),
+            relayIPs: ips.filter(function (ip) {
+              return parsed.some(function (item) { return item.address === ip && item.type === 'relay' })
+            }),
+            mdnsHostnames,
+            error: error || '',
+          })
+        }
+        const timer = setTimeout(function () { finish('timeout') }, timeoutMs)
+        try {
+          pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] })
+          pc.createDataChannel('audit')
+          pc.onicecandidate = function (event) {
+            if (event.candidate) {
+              candidates.push(event.candidate.candidate)
+              return
+            }
+            clearTimeout(timer)
+            finish('')
+          }
+          const offer = await pc.createOffer()
+          await pc.setLocalDescription(offer)
+        } catch (error) {
+          clearTimeout(timer)
+          finish(error && error.message ? error.message : String(error))
+        }
+      })
+    }
+
     const resolvedDateTime = safe(function () { return Intl.DateTimeFormat().resolvedOptions() }, {})
+    const pluginsWidevine = await getPluginsWidevine()
     return {
       collectedAt: new Date().toISOString(),
       url: location.href,
+      secureContext: safe(function () { return window.isSecureContext }, null),
       navigator: {
         webdriver: safe(function () { return navigator.webdriver }, null),
         userAgent: safe(function () { return navigator.userAgent }, ''),
@@ -1075,12 +1454,312 @@ async function collectLocalProbe(page) {
           }
         }, null),
       },
-      webgl: getWebGL(),
-      plugins: serializePluginArray(navigator.plugins),
-      mimeTypes: serializeMimeTypeArray(navigator.mimeTypes),
-      storage: await getStorageEstimate(),
+      webgl: getWebGL(1),
+      webgl2: getWebGL(2),
+      webgpu: await getWebGPU(),
+      fonts: getFonts(),
+      plugins: pluginsWidevine.plugins,
+      mimeTypes: pluginsWidevine.mimeTypes,
+      pluginsWidevine,
+      storage: await getStorage(),
+      webrtc: await getWebRTC(),
+      geolocationPermissions: await getGeolocationPermissions(),
     }
-  })
+  }, options || {})
+}
+
+function headerValue(headers, name) {
+  if (!headers || typeof headers !== 'object') {
+    return ''
+  }
+  const want = String(name || '').toLowerCase()
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() === want) {
+      return String(headers[key] === undefined || headers[key] === null ? '' : headers[key])
+    }
+  }
+  return ''
+}
+
+function pushIssue(issues, severity, code, message, observed, expected) {
+  issues.push({ severity, code, message, observed, expected })
+}
+
+function statusFromIssues(issues) {
+  if (issues.some(function (item) { return item.severity === 'red' })) {
+    return 'red'
+  }
+  if (issues.some(function (item) { return item.severity === 'yellow' })) {
+    return 'yellow'
+  }
+  return 'green'
+}
+
+function matrixEntry(observed, expected, issues) {
+  return {
+    observed,
+    expected,
+    status: statusFromIssues(issues),
+    issues,
+  }
+}
+
+function buildUACHHeadersDimension(localProbe, headerEcho) {
+  const nav = localProbe && localProbe.navigator ? localProbe.navigator : {}
+  const uaData = nav.userAgentData || null
+  const echoed = headerEcho && headerEcho.echoedHeaders ? headerEcho.echoedHeaders : {}
+  const requestHeaders = headerEcho && headerEcho.requestHeaders ? headerEcho.requestHeaders : {}
+  const issues = []
+  const observed = {
+    navigatorUserAgent: nav.userAgent || '',
+    userAgentData: uaData,
+    language: nav.language || '',
+    languages: nav.languages || [],
+    requestHeaders: {
+      userAgent: headerValue(requestHeaders, 'user-agent'),
+      secChUa: headerValue(requestHeaders, 'sec-ch-ua'),
+      secChUaPlatform: headerValue(requestHeaders, 'sec-ch-ua-platform'),
+      secChUaMobile: headerValue(requestHeaders, 'sec-ch-ua-mobile'),
+      acceptLanguage: headerValue(requestHeaders, 'accept-language'),
+    },
+    echoedHeaders: {
+      userAgent: headerValue(echoed, 'user-agent'),
+      secChUa: headerValue(echoed, 'sec-ch-ua'),
+      secChUaPlatform: headerValue(echoed, 'sec-ch-ua-platform'),
+      secChUaMobile: headerValue(echoed, 'sec-ch-ua-mobile'),
+      acceptLanguage: headerValue(echoed, 'accept-language'),
+    },
+    headerEcho,
+  }
+  const expected = {
+    source: 'runtime navigator + HTTP echo parity',
+    note: 'client_hints.json 是 data-only skeleton；本维度以 runtime UA-CH 与实际请求头为准。',
+    requiredHeaders: ['user-agent', 'sec-ch-ua', 'sec-ch-ua-platform', 'sec-ch-ua-mobile', 'accept-language'],
+  }
+  if (!uaData) {
+    pushIssue(issues, 'yellow', 'ua_ch_missing', 'navigator.userAgentData 不可用，无法验证 runtime UA-CH。', null, 'navigator.userAgentData')
+  }
+  if (headerEcho && headerEcho.error) {
+    pushIssue(issues, 'yellow', 'header_echo_failed', 'headers echo 请求失败，UA-CH 请求头只能使用 Playwright request 侧观测。', headerEcho.error, 'echo success')
+  }
+  if (observed.requestHeaders.userAgent && nav.userAgent && observed.requestHeaders.userAgent !== nav.userAgent) {
+    pushIssue(issues, 'red', 'user_agent_header_mismatch', '请求 User-Agent 与 navigator.userAgent 不一致。', observed.requestHeaders.userAgent, nav.userAgent)
+  }
+  if (uaData && observed.requestHeaders.secChUaPlatform) {
+    const normalizedPlatformHeader = observed.requestHeaders.secChUaPlatform.replace(/^"|"$/g, '')
+    if (uaData.platform && normalizedPlatformHeader && normalizedPlatformHeader !== uaData.platform) {
+      pushIssue(issues, 'yellow', 'sec_ch_platform_mismatch', 'sec-ch-ua-platform 与 navigator.userAgentData.platform 不一致。', normalizedPlatformHeader, uaData.platform)
+    }
+  }
+  if (uaData && observed.requestHeaders.secChUaMobile) {
+    const expectedMobile = uaData.mobile ? '?1' : '?0'
+    if (observed.requestHeaders.secChUaMobile !== expectedMobile) {
+      pushIssue(issues, 'yellow', 'sec_ch_mobile_mismatch', 'sec-ch-ua-mobile 与 navigator.userAgentData.mobile 不一致。', observed.requestHeaders.secChUaMobile, expectedMobile)
+    }
+  }
+  if (!observed.requestHeaders.acceptLanguage && !observed.echoedHeaders.acceptLanguage) {
+    pushIssue(issues, 'yellow', 'accept_language_header_missing', '未观测到 Accept-Language 请求头。', '', 'Accept-Language')
+  }
+  return matrixEntry(observed, expected, issues)
+}
+
+function buildGpuWebgpuDimension(localProbe) {
+  const issues = []
+  const observed = {
+    webgl: localProbe ? localProbe.webgl : null,
+    webgl2: localProbe ? localProbe.webgl2 : null,
+    webgpu: localProbe ? localProbe.webgpu : null,
+  }
+  const expected = {
+    webgl: 'supported desktop WebGL with coherent vendor/renderer',
+    webgpu: 'observed when runtime exposes navigator.gpu; unsupported is informational on older runtimes',
+  }
+  if (!observed.webgl || !observed.webgl.supported) {
+    pushIssue(issues, 'red', 'webgl_missing', 'WebGL 不可用，常见检测站会直接标记异常。', observed.webgl, 'supported')
+  } else if (!observed.webgl.vendor || !observed.webgl.renderer) {
+    pushIssue(issues, 'yellow', 'webgl_vendor_renderer_missing', 'WebGL vendor/renderer 为空。', observed.webgl, 'non-empty vendor/renderer')
+  }
+  if (!observed.webgl2 || !observed.webgl2.supported) {
+    pushIssue(issues, 'yellow', 'webgl2_missing', 'WebGL2 不可用，需确认是否符合目标 runtime。', observed.webgl2, 'supported for modern Chromium')
+  }
+  if (observed.webgpu && observed.webgpu.error) {
+    pushIssue(issues, 'yellow', 'webgpu_error', 'WebGPU probe 执行失败。', observed.webgpu.error, 'no error')
+  }
+  return matrixEntry(observed, expected, issues)
+}
+
+function buildStorageDimension(localProbe) {
+  const storage = localProbe ? localProbe.storage : null
+  const issues = []
+  const expected = {
+    quota: 'non-zero quota/usage estimate',
+    persistence: 'persisted() observable; persist() only attempted when probePersistStorage=true',
+    stores: 'localStorage, IndexedDB and CacheStorage usable in normal profiles',
+  }
+  if (!storage) {
+    pushIssue(issues, 'red', 'storage_probe_missing', 'storage probe 缺失。', null, 'storage result')
+    return matrixEntry(storage, expected, issues)
+  }
+  if (!storage.estimate || storage.estimate.error) {
+    pushIssue(issues, 'yellow', 'storage_estimate_failed', 'navigator.storage.estimate 不可用或失败。', storage.estimate, 'quota estimate')
+  } else if (!Number(storage.estimate.quota)) {
+    pushIssue(issues, 'yellow', 'storage_quota_empty', 'storage quota 为空，可能暴露异常 profile 或 incognito 行为。', storage.estimate.quota, 'non-zero quota')
+  }
+  for (const item of [
+    ['localStorage', storage.localStorage],
+    ['indexedDB', storage.indexedDB],
+    ['cacheStorage', storage.cacheStorage],
+  ]) {
+    if (!item[1] || item[1].ok !== true) {
+      pushIssue(issues, 'yellow', item[0] + '_unavailable', item[0] + ' 不可用或写入测试失败。', item[1], 'ok=true')
+    }
+  }
+  return matrixEntry(storage, expected, issues)
+}
+
+function buildWebRTCDimension(localProbe) {
+  const webrtc = localProbe ? localProbe.webrtc : null
+  const issues = []
+  const expected = {
+    policy: 'no private host IP leak; srflx should match proxy/egress when available',
+    candidateTypes: ['host via mDNS or no host IP', 'srflx/relay depending network policy'],
+  }
+  if (!webrtc || webrtc.supported === false) {
+    pushIssue(issues, 'yellow', 'webrtc_missing', 'RTCPeerConnection 不可用，无法验证 ICE 泄露。', webrtc, 'supported')
+    return matrixEntry(webrtc, expected, issues)
+  }
+  if (webrtc.error && webrtc.error !== 'timeout') {
+    pushIssue(issues, 'yellow', 'webrtc_probe_error', 'WebRTC ICE probe 执行异常。', webrtc.error, 'no error')
+  }
+  if (Array.isArray(webrtc.privateIPs) && webrtc.privateIPs.length > 0) {
+    pushIssue(issues, 'red', 'webrtc_private_ip_leak', 'ICE candidate 暴露内网或本机地址。', webrtc.privateIPs, 'no private IPs')
+  }
+  if (Array.isArray(webrtc.hostIPs) && webrtc.hostIPs.length > 0) {
+    pushIssue(issues, 'red', 'webrtc_host_ip_leak', 'host candidate 暴露真实 IP。', webrtc.hostIPs, 'mDNS hostname or no host IP')
+  }
+  if ((!webrtc.candidates || webrtc.candidates.length === 0) && webrtc.error === 'timeout') {
+    pushIssue(issues, 'yellow', 'webrtc_no_candidates', 'WebRTC probe 超时且未收集到 ICE candidates。', webrtc.error, 'candidate list')
+  }
+  return matrixEntry(webrtc, expected, issues)
+}
+
+function buildProxyDimension(headerEcho) {
+  const issues = []
+  const echoed = headerEcho && headerEcho.echoedHeaders ? headerEcho.echoedHeaders : {}
+  const observed = {
+    headerEcho,
+    proxyHeaders: {
+      via: headerValue(echoed, 'via'),
+      forwarded: headerValue(echoed, 'forwarded'),
+      xForwardedFor: headerValue(echoed, 'x-forwarded-for'),
+      xRealIP: headerValue(echoed, 'x-real-ip'),
+      proxyConnection: headerValue(echoed, 'proxy-connection'),
+    },
+    nextHopProtocol: headerEcho ? headerEcho.nextHopProtocol : '',
+    latencyMs: headerEcho ? headerEcho.durationMs : 0,
+  }
+  const expected = {
+    headers: 'no Via/Forwarded/X-Forwarded-For/X-Real-IP leakage',
+    transport: 'HTTP/2 or HTTP/3 observable when endpoint supports it; DNS/QUIC/SOCKS5 UDP require deeper network probes',
+  }
+  if (!headerEcho || headerEcho.enabled === false) {
+    pushIssue(issues, 'yellow', 'proxy_echo_disabled', 'headers echo 未启用，无法检查代理头泄露。', headerEcho, 'enabled echo')
+  } else if (headerEcho.error) {
+    pushIssue(issues, 'yellow', 'proxy_echo_failed', 'headers echo 请求失败，代理 header/协议矩阵不完整。', headerEcho.error, 'echo success')
+  }
+  for (const key of Object.keys(observed.proxyHeaders)) {
+    if (observed.proxyHeaders[key]) {
+      pushIssue(issues, 'red', 'proxy_header_leak_' + key, '代理相关请求头泄露：' + key, observed.proxyHeaders[key], 'empty')
+    }
+  }
+  if (!observed.nextHopProtocol) {
+    pushIssue(issues, 'yellow', 'next_hop_protocol_missing', '未观测到 nextHopProtocol，HTTP2/3 判定不完整。', '', 'h2/h3/http/1.1')
+  }
+  pushIssue(issues, 'yellow', 'deep_proxy_matrix_pending', 'DNS/QUIC/SOCKS5 UDP/TLS ALPN/CONNECT 深层矩阵仍需 Chromium/network patch 或本地 echo 扩展。', 'not measured', 'measured')
+  return matrixEntry(observed, expected, issues)
+}
+
+function buildFontsDimension(localProbe) {
+  const fonts = localProbe ? localProbe.fonts : null
+  const issues = []
+  const expected = {
+    method: 'canvas text metrics marker-font observation',
+    note: '仅观测，不伪造 FontFace/native font APIs。',
+  }
+  if (!fonts || fonts.error) {
+    pushIssue(issues, 'yellow', 'fonts_probe_failed', '字体 probe 失败。', fonts, 'available font markers')
+  } else if (!Array.isArray(fonts.available) || fonts.available.length === 0) {
+    pushIssue(issues, 'yellow', 'fonts_empty', '未检测到 marker fonts，可能是极简字体环境或 probe 不足。', fonts.available, 'some platform marker fonts')
+  }
+  return matrixEntry(fonts, expected, issues)
+}
+
+function buildPluginsWidevineDimension(localProbe) {
+  const value = localProbe ? localProbe.pluginsWidevine : null
+  const issues = []
+  const expected = {
+    pdf: 'Chromium PDF Viewer normally exposed',
+    widevine: 'Widevine availability depends on runtime build; record support/error without JS spoofing',
+  }
+  if (!value) {
+    pushIssue(issues, 'yellow', 'plugins_probe_missing', '插件/Widevine probe 缺失。', null, 'pluginsWidevine result')
+    return matrixEntry(value, expected, issues)
+  }
+  if (value.pdfViewerEnabled !== true && (!value.pdfPluginNames || value.pdfPluginNames.length === 0)) {
+    pushIssue(issues, 'yellow', 'pdf_viewer_missing', '未观测到 PDF Viewer。', value.pdfViewerEnabled, 'pdfViewerEnabled=true or PDF plugin')
+  }
+  if (value.widevine && value.widevine.error) {
+    pushIssue(issues, 'yellow', 'widevine_unavailable', 'Widevine 不可用或 EME 探测失败。', value.widevine.error, 'supported or known unavailable by runtime')
+  }
+  return matrixEntry(value, expected, issues)
+}
+
+function buildGeolocationDimension(localProbe) {
+  const value = localProbe ? localProbe.geolocationPermissions : null
+  const issues = []
+  const expected = {
+    geolocation: 'API present with permission state observable',
+    permissions: 'permission states should be queryable without prompting',
+  }
+  if (!value || !value.geolocation || !value.geolocation.supported) {
+    pushIssue(issues, 'yellow', 'geolocation_missing', 'geolocation API 不可用。', value, 'navigator.geolocation')
+    return matrixEntry(value, expected, issues)
+  }
+  if (!value.geolocation.permission || value.geolocation.permission.supported === false || value.geolocation.permission.error) {
+    pushIssue(issues, 'yellow', 'geolocation_permission_unobservable', 'geolocation 权限状态无法观测。', value.geolocation.permission, 'permissions.query geolocation')
+  }
+  return matrixEntry(value, expected, issues)
+}
+
+function buildFingerprintMatrix(localProbe, headerEcho) {
+  const matrix = {
+    uaChHeaders: buildUACHHeadersDimension(localProbe, headerEcho),
+    gpuWebgpu: buildGpuWebgpuDimension(localProbe),
+    storage: buildStorageDimension(localProbe),
+    webrtc: buildWebRTCDimension(localProbe),
+    proxy: buildProxyDimension(headerEcho),
+    fonts: buildFontsDimension(localProbe),
+    pluginsWidevine: buildPluginsWidevineDimension(localProbe),
+    geolocation: buildGeolocationDimension(localProbe),
+  }
+  const issues = []
+  for (const dimension of Object.keys(matrix)) {
+    for (const issue of matrix[dimension].issues || []) {
+      issues.push(Object.assign({ dimension }, issue))
+    }
+  }
+  return {
+    matrix,
+    dimensions: Object.keys(matrix).reduce(function (acc, key) {
+      acc[key] = {
+        status: matrix[key].status,
+        issueCount: (matrix[key].issues || []).length,
+      }
+      return acc
+    }, {}),
+    issues,
+    status: statusFromIssues(issues),
+  }
 }
 
 module.exports.run = async ({ launch, connect, selector, params, log, artifact, artifactsDir }) => {
@@ -1089,6 +1768,10 @@ module.exports.run = async ({ launch, connect, selector, params, log, artifact, 
   const localProbeOnly = normalizeBool(params.localProbeOnly, false)
   const captureScreenshot = normalizeBool(params.captureScreenshot, true)
   const saveHtml = normalizeBool(params.saveHtml, true)
+  const enableHeaderEcho = normalizeBool(params.enableHeaderEcho, true)
+  const headerEchoUrl = enableHeaderEcho ? normalizeHeaderEchoUrl(params.headerEchoUrl) : ''
+  const probePersistStorage = normalizeBool(params.probePersistStorage, false)
+  const webrtcProbeTimeoutMs = normalizeInt(params.webrtcProbeTimeoutMs, 3500, 500, 15000)
   const detectors = localProbeOnly ? [] : normalizeDetectorEntries(params.detectors)
   const startedAt = new Date().toISOString()
 
@@ -1113,10 +1796,24 @@ module.exports.run = async ({ launch, connect, selector, params, log, artifact, 
   }
   const detectorResults = []
   let localProbe = null
+  let headerEcho = null
 
   try {
     await page.goto('about:blank', { waitUntil: 'load', timeout })
-    localProbe = await collectLocalProbe(page)
+    if (enableHeaderEcho) {
+      headerEcho = await collectHeaderEcho(page, headerEchoUrl, timeout)
+      log('headerEcho', {
+        url: headerEcho.url,
+        status: headerEcho.status,
+        nextHopProtocol: headerEcho.nextHopProtocol,
+        durationMs: headerEcho.durationMs,
+        error: headerEcho.error,
+      })
+    } else {
+      headerEcho = { enabled: false, error: 'disabled by params.enableHeaderEcho=false' }
+    }
+
+    localProbe = await collectLocalProbe(page, { probePersistStorage, webrtcProbeTimeoutMs })
     artifacts.localProbe = artifact('local-probe.json')
     writeJSON(artifacts.localProbe, localProbe)
     log('localProbePath', artifacts.localProbe)
@@ -1162,8 +1859,9 @@ module.exports.run = async ({ launch, connect, selector, params, log, artifact, 
     }
   }
 
+  const matrixResult = buildFingerprintMatrix(localProbe, headerEcho)
   const report = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     auditId: 'fingerprint-audit-' + Date.now(),
     createdAt: startedAt,
     finishedAt: new Date().toISOString(),
@@ -1173,17 +1871,25 @@ module.exports.run = async ({ launch, connect, selector, params, log, artifact, 
       localProbeOnly,
       captureScreenshot,
       saveHtml,
+      enableHeaderEcho,
+      headerEchoUrl,
+      probePersistStorage,
+      webrtcProbeTimeoutMs,
       waitAfterLoadMs,
       timeoutMs: timeout,
     },
     session,
     observed: {
       localProbe,
+      headerEcho,
       detectorResults,
     },
+    matrix: matrixResult.matrix,
     validation: {
-      status: 'manual',
-      notes: '第三方检测站结果仅采集，不作为自动阻断。',
+      status: matrixResult.status,
+      dimensions: matrixResult.dimensions,
+      issues: matrixResult.issues,
+      notes: '第三方检测站结果仅采集，不作为自动阻断；schemaVersion=2 的 matrix 用于本地能力矩阵判定。',
     },
     artifacts,
   }
@@ -1202,6 +1908,8 @@ module.exports.run = async ({ launch, connect, selector, params, log, artifact, 
     localProbePath: artifacts.localProbe,
     detectorCount: detectorResults.length,
     detectorErrorCount,
+    validationStatus: matrixResult.status,
+    matrix: matrixResult.dimensions,
     artifacts,
   }
 }`,
