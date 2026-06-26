@@ -327,6 +327,68 @@ func TestRunScriptTaskLaunchNormalizesLaunchCodeSelector(t *testing.T) {
 	}
 }
 
+func TestRunScriptTaskProvidesHumanHelpers(t *testing.T) {
+	nodeExecPath := lookupNodeExecutable(t)
+
+	cfg := config.DefaultConfig()
+	cfg.Automation.Enabled = true
+	cfg.Automation.NodeSource = config.AutomationNodeSourceSystem
+	cfg.Automation.SystemNodePath = nodeExecPath
+	cfg.Automation.NodeVersion = "test-node"
+	cfg.Automation.PlaywrightCoreVersion = "1.59.0"
+	cfg.Automation.RuntimeVersion = "test-runtime"
+
+	manager := NewManager(t.TempDir(), cfg, nil, Options{})
+
+	state := manager.CurrentState()
+	if err := writeRunnerScript(state.RunnerPath); err != nil {
+		t.Fatalf("write runner script failed: %v", err)
+	}
+	if err := writeMockPlaywrightModule(state.RuntimeDir, cfg.Automation.PlaywrightCoreVersion); err != nil {
+		t.Fatalf("write mock playwright module failed: %v", err)
+	}
+
+	scriptDir := filepath.Join(state.RuntimeDir, "tmp", "scripts")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("create script dir failed: %v", err)
+	}
+	scriptPath := filepath.Join(scriptDir, "script-human.cjs")
+	scriptSource := `module.exports.run = async ({ human }) => ({
+  ok: true,
+  summary: 'human helpers ready',
+  helpers: {
+    click: typeof human.click,
+    type: typeof human.type,
+    scroll: typeof human.scroll,
+    moveMouse: typeof human.moveMouse,
+  },
+})`
+	if err := os.WriteFile(scriptPath, []byte(scriptSource), 0o644); err != nil {
+		t.Fatalf("write script failed: %v", err)
+	}
+
+	result, err := manager.RunScriptTask(context.Background(), ScriptTaskRequest{
+		TaskKey:    "script:human",
+		ScriptPath: scriptPath,
+	})
+	if err != nil {
+		t.Fatalf("RunScriptTask returned error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected script task to succeed, got %+v", result)
+	}
+	for _, snippet := range []string{
+		`"click":"function"`,
+		`"type":"function"`,
+		`"scroll":"function"`,
+		`"moveMouse":"function"`,
+	} {
+		if !strings.Contains(result.ResultText, snippet) {
+			t.Fatalf("expected result text to contain %s, got %s", snippet, result.ResultText)
+		}
+	}
+}
+
 func TestRunScriptTaskFallsBackToLaunchBaseURLWhenSessionEndpointIsInvalid(t *testing.T) {
 	nodeExecPath := lookupNodeExecutable(t)
 

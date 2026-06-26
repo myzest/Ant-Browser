@@ -60,11 +60,17 @@ func TestLoadLibraryFromData(t *testing.T) {
 	if len(lib.clientHints) < 3 {
 		t.Fatalf("expected embedded client hints data, got %d", len(lib.clientHints))
 	}
+	if len(lib.mediaCaps) < 3 {
+		t.Fatalf("expected embedded media capability data, got %d", len(lib.mediaCaps))
+	}
 	if lib.regions["US"].AcceptLanguage != "en-US,en;q=0.9" {
 		t.Fatalf("expected US accept-language stack, got %#v", lib.regions["US"])
 	}
 	if got := lib.clientHints[PlatformWindows]; got.RuntimeCoverage != "data-only" || len(got.Brands) == 0 {
 		t.Fatalf("expected data-only Windows client hints skeleton, got %#v", got)
+	}
+	if got := lib.mediaCaps[PlatformWindows]; got.RuntimeCoverage != "capability-matrix" || !got.PDFViewer || len(got.MimeTypes) == 0 || !got.Codecs.H264 {
+		t.Fatalf("expected Windows media capability matrix, got %#v", got)
 	}
 }
 
@@ -156,6 +162,9 @@ func TestGenerateAddsLocaleLanguageStack(t *testing.T) {
 	if us.ClientHints.RuntimeCoverage != "data-only" || us.ClientHints.Platform != "Windows" {
 		t.Fatalf("expected Windows UA-CH data-only skeleton, got %#v", us.ClientHints)
 	}
+	if us.MediaCaps.RuntimeCoverage != "capability-matrix" || !us.MediaCaps.PDFViewer {
+		t.Fatalf("expected Windows media capability matrix, got %#v", us.MediaCaps)
+	}
 
 	cn, err := Generate(lib, GenerateOptions{ProfileID: "profile-cn", Platform: "windows", Country: "CN"})
 	if err != nil {
@@ -174,6 +183,37 @@ func TestGenerateAddsLocaleLanguageStack(t *testing.T) {
 	}
 	if !contains(Args(us), "--fingerprint-accept-language=en-US,en;q=0.9") {
 		t.Fatalf("expected generated args to include accept-language, got %#v", Args(us))
+	}
+}
+
+func TestMediaCapabilitiesForPlatform(t *testing.T) {
+	t.Parallel()
+
+	windows := MediaCapabilitiesForPlatform("windows")
+	if !windows.PDFViewer || !windows.WidevinePresent || !windows.EMESupported || !windows.Codecs.H264 || !windows.Codecs.AAC {
+		t.Fatalf("expected Windows media capability profile with PDF/Widevine/H264/AAC, got %#v", windows)
+	}
+	linux := MediaCapabilitiesForPlatform("linux")
+	if !linux.PDFViewer || linux.WidevinePresent || linux.EMESupported || linux.Codecs.H264 || linux.Codecs.AAC || !linux.Codecs.VP9 {
+		t.Fatalf("expected conservative Linux media capability profile, got %#v", linux)
+	}
+}
+
+func TestValidateArgsWarnsImpossibleScreenGeometry(t *testing.T) {
+	t.Parallel()
+
+	report := Health([]string{
+		"--fingerprint=111",
+		"--fingerprint-brand=Chrome",
+		"--fingerprint-platform=windows",
+		"--window-size=1280,720",
+		"--fingerprint-screen-avail=1920,1080",
+		"--fingerprint-fonts=Arial,Calibri",
+		"--fingerprint-webgl-vendor=Intel",
+		"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+	})
+	if report.Status != "red" || !hasIssue(report, "screen_avail_exceeds_size") {
+		t.Fatalf("expected impossible screen geometry to be red, got %#v", report)
 	}
 }
 

@@ -19,6 +19,165 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function clampNumber(value, min, max, fallback) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    return fallback;
+  }
+  return Math.max(min, Math.min(max, parsed));
+}
+
+function createSeededRandom(seedText) {
+  let seed = 2166136261;
+  const text = String(seedText || 'ant-humanize');
+  for (let i = 0; i < text.length; i += 1) {
+    seed ^= text.charCodeAt(i);
+    seed = Math.imul(seed, 16777619);
+  }
+  return () => {
+    seed += 0x6d2b79f5;
+    let value = seed;
+    value = Math.imul(value ^ (value >>> 15), value | 1);
+    value ^= value + Math.imul(value ^ (value >>> 7), value | 61);
+    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+function createHumanHelpers(log) {
+  const presets = {
+    default: { moveSteps: 24, moveDelayMs: 8, jitter: 3, overshoot: 0.18, typeDelayMs: 65, scrollSteps: 10, scrollDelayMs: 35 },
+    careful: { moveSteps: 38, moveDelayMs: 14, jitter: 2, overshoot: 0.1, typeDelayMs: 110, scrollSteps: 16, scrollDelayMs: 55 },
+    fast: { moveSteps: 14, moveDelayMs: 4, jitter: 4, overshoot: 0.22, typeDelayMs: 35, scrollSteps: 7, scrollDelayMs: 20 },
+  };
+  const random = createSeededRandom(`${Date.now()}-${process.pid}`);
+  const resolvePreset = (options = {}) => {
+    const presetName = String(options.preset || 'default').trim();
+    const base = presets[presetName] || presets.default;
+    return {
+      ...base,
+      ...options,
+      moveSteps: clampNumber(options.moveSteps, 4, 120, base.moveSteps),
+      moveDelayMs: clampNumber(options.moveDelayMs, 0, 200, base.moveDelayMs),
+      jitter: clampNumber(options.jitter, 0, 40, base.jitter),
+      overshoot: clampNumber(options.overshoot, 0, 0.8, base.overshoot),
+      typeDelayMs: clampNumber(options.typeDelayMs, 0, 1000, base.typeDelayMs),
+      scrollSteps: clampNumber(options.scrollSteps, 1, 120, base.scrollSteps),
+      scrollDelayMs: clampNumber(options.scrollDelayMs, 0, 500, base.scrollDelayMs),
+    };
+  };
+  const centerOf = async (locator, timeoutMs) => {
+    if (!locator) {
+      throw new Error('human action requires a locator or element handle');
+    }
+    if (typeof locator.waitFor === 'function') {
+      await locator.waitFor({ state: 'visible', timeout: timeoutMs }).catch(() => {});
+    }
+    if (typeof locator.scrollIntoViewIfNeeded === 'function') {
+      await locator.scrollIntoViewIfNeeded({ timeout: timeoutMs }).catch(() => {});
+    }
+    const box = typeof locator.boundingBox === 'function' ? await locator.boundingBox() : null;
+    if (!box || box.width <= 0 || box.height <= 0) {
+      throw new Error('target is not visible or has no bounding box');
+    }
+    return {
+      x: box.x + box.width / 2,
+      y: box.y + box.height / 2,
+      box,
+    };
+  };
+  const moveMouse = async (page, target, options = {}) => {
+    const cfg = resolvePreset(options);
+    if (!page || !page.mouse) {
+      throw new Error('human mouse action requires a Playwright page');
+    }
+    const steps = Math.round(cfg.moveSteps);
+    const start = {
+      x: target.x - 80 + random() * 160,
+      y: target.y - 60 + random() * 120,
+    };
+    const overshoot = {
+      x: target.x + (random() - 0.5) * cfg.overshoot * Math.max(20, target.box ? target.box.width : 80),
+      y: target.y + (random() - 0.5) * cfg.overshoot * Math.max(20, target.box ? target.box.height : 50),
+    };
+    await page.mouse.move(start.x, start.y);
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
+      const ease = t * t * (3 - 2 * t);
+      const midWeight = Math.sin(Math.PI * t);
+      const x = start.x + (target.x - start.x) * ease + (overshoot.x - target.x) * midWeight + (random() - 0.5) * cfg.jitter;
+      const y = start.y + (target.y - start.y) * ease + (overshoot.y - target.y) * midWeight + (random() - 0.5) * cfg.jitter;
+      await page.mouse.move(x, y);
+      if (cfg.moveDelayMs > 0) {
+        await sleep(cfg.moveDelayMs + Math.round(random() * cfg.moveDelayMs));
+      }
+    }
+    await page.mouse.move(target.x, target.y);
+  };
+  const click = async (locator, options = {}) => {
+    const cfg = resolvePreset(options);
+    const timeoutMs = clampNumber(options.timeoutMs, 250, 60000, 10000);
+    const target = await centerOf(locator, timeoutMs);
+    const page = options.page || (typeof locator.page === 'function' ? locator.page() : null);
+    if (!page || !page.mouse) {
+      throw new Error('human.click requires options.page when the target does not expose page()');
+    }
+    await moveMouse(page, target, cfg);
+    if (typeof locator.isEnabled === 'function') {
+      const enabled = await locator.isEnabled({ timeout: timeoutMs }).catch(() => true);
+      if (!enabled) {
+        throw new Error('target is not enabled');
+      }
+    }
+    await sleep(clampNumber(options.beforeClickDelayMs, 0, 2000, 80 + random() * 140));
+    await page.mouse.down();
+    await sleep(clampNumber(options.holdMs, 20, 1000, 45 + random() * 90));
+    await page.mouse.up();
+    if (typeof log === 'function') {
+      log('human.click', { preset: options.preset || 'default' });
+    }
+  };
+  const type = async (locator, text, options = {}) => {
+    await click(locator, { ...options, beforeClickDelayMs: options.beforeClickDelayMs || 40 });
+    const page = options.page || (typeof locator.page === 'function' ? locator.page() : null);
+    if (!page || !page.keyboard) {
+      throw new Error('human.type requires options.page when the target does not expose page()');
+    }
+    const cfg = resolvePreset(options);
+    const value = String(text == null ? '' : text);
+    for (const char of value) {
+      await page.keyboard.type(char, { delay: Math.round(cfg.typeDelayMs + random() * cfg.typeDelayMs) });
+      if (random() < 0.04) {
+        await sleep(Math.round(cfg.typeDelayMs * (2 + random() * 3)));
+      }
+    }
+    if (typeof log === 'function') {
+      log('human.type', { preset: options.preset || 'default', length: value.length });
+    }
+  };
+  const scroll = async (page, options = {}) => {
+    if (!page || !page.mouse) {
+      throw new Error('human scroll requires a Playwright page');
+    }
+    const cfg = resolvePreset(options);
+    const direction = String(options.direction || 'down').toLowerCase() === 'up' ? -1 : 1;
+    const total = clampNumber(options.distance, 80, 8000, 600);
+    const steps = Math.round(cfg.scrollSteps);
+    for (let i = 1; i <= steps; i += 1) {
+      const t = i / steps;
+      const weight = Math.sin(Math.PI * t) || 0.2;
+      const delta = direction * (total / steps) * (0.45 + weight);
+      await page.mouse.wheel(0, delta);
+      if (cfg.scrollDelayMs > 0) {
+        await sleep(cfg.scrollDelayMs + Math.round(random() * cfg.scrollDelayMs));
+      }
+    }
+    if (typeof log === 'function') {
+      log('human.scroll', { preset: options.preset || 'default', direction, distance: total });
+    }
+  };
+  return { click, type, scroll, moveMouse };
+}
+
 function writeStream(stream, text) {
   return new Promise((resolve, reject) => {
     stream.write(text, (error) => {
@@ -437,6 +596,7 @@ async function runScriptTask(payload, chromium) {
     selector,
     params,
     log,
+    human: createHumanHelpers(log),
     artifact,
     artifactsDir: payload.artifactDir || '',
   };

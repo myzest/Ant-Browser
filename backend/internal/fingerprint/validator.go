@@ -72,6 +72,9 @@ func ValidateArgsWithContext(args []string, ctx ValidationContext) []ValidationI
 				if availWidth > width || availHeight > height {
 					issues = append(issues, issue("screen_avail_exceeds_size", "red", "--fingerprint-screen-avail", "可用屏幕尺寸不应大于屏幕尺寸"))
 				}
+				if availWidth < 640 || availHeight < 480 {
+					issues = append(issues, issue("screen_avail_too_small", "yellow", "--fingerprint-screen-avail", "可用屏幕区域过小，容易暴露异常窗口或虚拟显示环境"))
+				}
 				if width-availWidth > 120 || height-availHeight > 180 {
 					issues = append(issues, issue("screen_avail_gap_unusual", "yellow", "--fingerprint-screen-avail", "屏幕与可用区域差值不常见"))
 				}

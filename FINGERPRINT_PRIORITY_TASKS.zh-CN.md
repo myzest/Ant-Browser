@@ -605,4 +605,6 @@
 - P1-1 / P1-2 / P1-3 / P1-4 / P1-5：已建立 `backend/internal/fingerprint` 数据目录，`profiles/locales/fonts/webgl/screen/media_devices` 均参与生成；前端支持生成、恢复推荐值、健康检查和分维状态展示。
 - P2-1 / P2-2 / P2-4：已落地参数层闭环。`geoip` 配置支持本地 `.mmdb` 或 MaxMind 官方凭证下载 GeoLite2-City 到本地缓存；代理 IP 健康结果会缓存出口 IP/国家/地区/城市/timezone/locale，并反哺 `--lang`、`--fingerprint-locale`、`--timezone`、`--fingerprint-timezone`、`--fingerprint-webrtc-ip`；普通 profile 默认使用稳定 user data dir。
 - P2-3 / P2-5：当前仓库和已接入的 `fingerprint-chromium` 参数面未发现 geolocation、Storage quota 的原生启动参数。不要用无效参数假装覆盖；这两项进入 P5 Chromium patch / 能力探测后再落地。
+- P3-1 / P3-3 / P3-4：已补充 UA-CH runtime parity、viewport 物理一致性、MediaSource/canPlayType/WebCodecs、plugins/mimeTypes/PDF/Widevine/EME 的 `fingerprint-audit` 观测维度；新增 `media_capabilities.json` 作为能力矩阵数据源。当前仍是“能力探测 + 一致性审计”，不是 runtime UA-CH / plugins / codec 伪装完成。
+- P4-1：自动化 runner 已暴露 `human.click/type/scroll/moveMouse` 最小 helper，用于脚本显式选择 humanize 行为；默认脚本行为保持兼容，不会自动改写所有 Playwright 操作。
 - Bot:nodriver 与 Browser Tampering:Yes：按当前任务要求暂不处理，保留到 P4/P5 自动化和内核 patch 阶段。

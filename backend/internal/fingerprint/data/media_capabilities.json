@@ -1,0 +1,86 @@
+{
+  "windows": {
+    "runtimeCoverage": "capability-matrix",
+    "chromeMajor": "core-major",
+    "pdfViewer": true,
+    "widevinePresent": true,
+    "emeSupported": true,
+    "plugins": [
+      { "name": "PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "Chrome PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "Chromium PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "Microsoft Edge PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "WebKit built-in PDF", "filename": "internal-pdf-viewer", "description": "Portable Document Format" }
+    ],
+    "mimeTypes": [
+      { "type": "application/pdf", "suffixes": "pdf", "description": "Portable Document Format" },
+      { "type": "text/pdf", "suffixes": "pdf", "description": "Portable Document Format" }
+    ],
+    "codecs": {
+      "h264": true,
+      "aac": true,
+      "vp9": true,
+      "av1": true,
+      "hevc": false
+    },
+    "notes": [
+      "Capability matrix only; runtime spoofing must be backed by Chromium core support or measured browser capabilities."
+    ]
+  },
+  "mac": {
+    "runtimeCoverage": "capability-matrix",
+    "chromeMajor": "core-major",
+    "pdfViewer": true,
+    "widevinePresent": true,
+    "emeSupported": true,
+    "plugins": [
+      { "name": "PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "Chrome PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "Chromium PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "Microsoft Edge PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "WebKit built-in PDF", "filename": "internal-pdf-viewer", "description": "Portable Document Format" }
+    ],
+    "mimeTypes": [
+      { "type": "application/pdf", "suffixes": "pdf", "description": "Portable Document Format" },
+      { "type": "text/pdf", "suffixes": "pdf", "description": "Portable Document Format" }
+    ],
+    "codecs": {
+      "h264": true,
+      "aac": true,
+      "vp9": true,
+      "av1": true,
+      "hevc": false
+    },
+    "notes": [
+      "Capability matrix only; runtime spoofing must be backed by Chromium core support or measured browser capabilities."
+    ]
+  },
+  "linux": {
+    "runtimeCoverage": "capability-matrix",
+    "chromeMajor": "core-major",
+    "pdfViewer": true,
+    "widevinePresent": false,
+    "emeSupported": false,
+    "plugins": [
+      { "name": "PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "Chrome PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "Chromium PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "Microsoft Edge PDF Viewer", "filename": "internal-pdf-viewer", "description": "Portable Document Format" },
+      { "name": "WebKit built-in PDF", "filename": "internal-pdf-viewer", "description": "Portable Document Format" }
+    ],
+    "mimeTypes": [
+      { "type": "application/pdf", "suffixes": "pdf", "description": "Portable Document Format" },
+      { "type": "text/pdf", "suffixes": "pdf", "description": "Portable Document Format" }
+    ],
+    "codecs": {
+      "h264": false,
+      "aac": false,
+      "vp9": true,
+      "av1": true,
+      "hevc": false
+    },
+    "notes": [
+      "Linux Chromium capability varies by build; switch to a Widevine/proprietary-codec profile only after runtime probing confirms support."
+    ]
+  }
+}

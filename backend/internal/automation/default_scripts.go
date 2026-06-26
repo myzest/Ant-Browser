@@ -1293,6 +1293,7 @@ async function collectLocalProbe(page, options) {
     const getPluginsWidevine = async function () {
       const plugins = serializePluginArray(navigator.plugins)
       const mimeTypes = serializeMimeTypeArray(navigator.mimeTypes)
+      const mediaCapabilities = getMediaCapabilities()
       const widevine = { supported: false, error: '' }
       if (typeof navigator.requestMediaKeySystemAccess === 'function') {
         try {
@@ -1314,7 +1315,69 @@ async function collectLocalProbe(page, options) {
         mimeTypes,
         pdfViewerEnabled: safe(function () { return navigator.pdfViewerEnabled }, null),
         pdfPluginNames: plugins.filter(function (item) { return /pdf/i.test(item.name + ' ' + item.description) }).map(function (item) { return item.name }),
+        mediaCapabilities,
         widevine,
+      }
+    }
+
+    const getMediaCapabilities = function () {
+      const video = document.createElement('video')
+      const audio = document.createElement('audio')
+      const testCanPlay = function (element, contentType) {
+        return safe(function () {
+          if (!element || typeof element.canPlayType !== 'function') {
+            return ''
+          }
+          return String(element.canPlayType(contentType) || '')
+        }, '')
+      }
+      const testMSE = function (contentType) {
+        return safe(function () {
+          if (!window.MediaSource || typeof MediaSource.isTypeSupported !== 'function') {
+            return null
+          }
+          return Boolean(MediaSource.isTypeSupported(contentType))
+        }, null)
+      }
+      const testWebCodecs = function () {
+        return {
+          videoEncoder: safe(function () { return typeof window.VideoEncoder === 'function' }, false),
+          videoDecoder: safe(function () { return typeof window.VideoDecoder === 'function' }, false),
+          audioEncoder: safe(function () { return typeof window.AudioEncoder === 'function' }, false),
+          audioDecoder: safe(function () { return typeof window.AudioDecoder === 'function' }, false),
+        }
+      }
+      const codecs = {
+        h264: {
+          contentType: 'video/mp4; codecs="avc1.42E01E"',
+          canPlayType: testCanPlay(video, 'video/mp4; codecs="avc1.42E01E"'),
+          mediaSource: testMSE('video/mp4; codecs="avc1.42E01E"'),
+        },
+        aac: {
+          contentType: 'audio/mp4; codecs="mp4a.40.2"',
+          canPlayType: testCanPlay(audio, 'audio/mp4; codecs="mp4a.40.2"'),
+          mediaSource: testMSE('audio/mp4; codecs="mp4a.40.2"'),
+        },
+        vp9: {
+          contentType: 'video/webm; codecs="vp9"',
+          canPlayType: testCanPlay(video, 'video/webm; codecs="vp9"'),
+          mediaSource: testMSE('video/webm; codecs="vp9"'),
+        },
+        av1: {
+          contentType: 'video/mp4; codecs="av01.0.05M.08"',
+          canPlayType: testCanPlay(video, 'video/mp4; codecs="av01.0.05M.08"'),
+          mediaSource: testMSE('video/mp4; codecs="av01.0.05M.08"'),
+        },
+        hevc: {
+          contentType: 'video/mp4; codecs="hvc1.1.6.L93.B0"',
+          canPlayType: testCanPlay(video, 'video/mp4; codecs="hvc1.1.6.L93.B0"'),
+          mediaSource: testMSE('video/mp4; codecs="hvc1.1.6.L93.B0"'),
+        },
+      }
+      return {
+        codecs,
+        mediaSourceSupported: safe(function () { return Boolean(window.MediaSource) }, false),
+        webCodecs: testWebCodecs(),
       }
     }
 
@@ -1560,6 +1623,65 @@ function buildUACHHeadersDimension(localProbe, headerEcho) {
   if (!observed.requestHeaders.acceptLanguage && !observed.echoedHeaders.acceptLanguage) {
     pushIssue(issues, 'yellow', 'accept_language_header_missing', '未观测到 Accept-Language 请求头。', '', 'Accept-Language')
   }
+  if (uaData && Array.isArray(uaData.fullVersionList) && uaData.fullVersionList.length > 0) {
+    const majorFromUA = (nav.userAgent || '').match(/(?:Chrome|Chromium)\/(\d+)/)
+    const fullVersion = uaData.fullVersionList.map(function (item) { return item && item.version ? String(item.version) : '' }).find(Boolean)
+    const majorFromCH = fullVersion ? fullVersion.split('.')[0] : ''
+    if (majorFromUA && majorFromCH && majorFromUA[1] !== majorFromCH) {
+      pushIssue(issues, 'red', 'ua_ch_major_mismatch', 'UA 与 UA-CH fullVersionList 的 Chrome major 不一致。', majorFromCH, majorFromUA[1])
+    }
+  }
+  return matrixEntry(observed, expected, issues)
+}
+
+function buildViewportGeometryDimension(localProbe) {
+  const screen = localProbe ? localProbe.screen : null
+  const issues = []
+  const expected = {
+    geometry: 'outerWidth >= innerWidth, outerHeight >= innerHeight, avail <= screen, inner <= avail',
+    mode: 'headed should track the real OS window; headless should keep deterministic coherent viewport',
+  }
+  if (!screen) {
+    pushIssue(issues, 'red', 'viewport_probe_missing', '窗口/屏幕 probe 缺失。', null, 'screen result')
+    return matrixEntry(screen, expected, issues)
+  }
+  const num = function (value) {
+    const parsed = Number(value)
+    return Number.isFinite(parsed) ? parsed : null
+  }
+  const observed = {
+    width: num(screen.width),
+    height: num(screen.height),
+    availWidth: num(screen.availWidth),
+    availHeight: num(screen.availHeight),
+    innerWidth: num(screen.innerWidth),
+    innerHeight: num(screen.innerHeight),
+    outerWidth: num(screen.outerWidth),
+    outerHeight: num(screen.outerHeight),
+    devicePixelRatio: num(screen.devicePixelRatio),
+    visualViewport: screen.visualViewport || null,
+  }
+  if (observed.outerWidth !== null && observed.innerWidth !== null && observed.outerWidth < observed.innerWidth) {
+    pushIssue(issues, 'red', 'outer_width_less_than_inner', 'outerWidth 小于 innerWidth，属于物理不可能窗口。', observed.outerWidth, '>= ' + observed.innerWidth)
+  }
+  if (observed.outerHeight !== null && observed.innerHeight !== null && observed.outerHeight < observed.innerHeight) {
+    pushIssue(issues, 'red', 'outer_height_less_than_inner', 'outerHeight 小于 innerHeight，属于物理不可能窗口。', observed.outerHeight, '>= ' + observed.innerHeight)
+  }
+  if (observed.availWidth !== null && observed.width !== null && observed.availWidth > observed.width) {
+    pushIssue(issues, 'red', 'avail_width_exceeds_screen', 'availWidth 不应大于 screen.width。', observed.availWidth, '<= ' + observed.width)
+  }
+  if (observed.availHeight !== null && observed.height !== null && observed.availHeight > observed.height) {
+    pushIssue(issues, 'red', 'avail_height_exceeds_screen', 'availHeight 不应大于 screen.height。', observed.availHeight, '<= ' + observed.height)
+  }
+  if (observed.innerWidth !== null && observed.availWidth !== null && observed.innerWidth > observed.availWidth + 8) {
+    pushIssue(issues, 'yellow', 'inner_width_exceeds_avail', 'innerWidth 大于可用屏幕宽度，可能是 viewport emulation 或窗口模型异常。', observed.innerWidth, '<= ' + observed.availWidth)
+  }
+  if (observed.innerHeight !== null && observed.availHeight !== null && observed.innerHeight > observed.availHeight + 120) {
+    pushIssue(issues, 'yellow', 'inner_height_exceeds_avail', 'innerHeight 明显大于可用屏幕高度，可能是 viewport emulation 或窗口模型异常。', observed.innerHeight, '<= ' + observed.availHeight)
+  }
+  if (observed.devicePixelRatio !== null && (observed.devicePixelRatio <= 0 || observed.devicePixelRatio > 4)) {
+    pushIssue(issues, 'yellow', 'viewport_dpr_unusual', 'devicePixelRatio 不在常见桌面范围。', observed.devicePixelRatio, '0 < dpr <= 4')
+  }
   return matrixEntry(observed, expected, issues)
 }
 
@@ -1700,16 +1822,36 @@ function buildPluginsWidevineDimension(localProbe) {
   const expected = {
     pdf: 'Chromium PDF Viewer normally exposed',
     widevine: 'Widevine availability depends on runtime build; record support/error without JS spoofing',
+    codecs: 'PDF, EME and media codec capabilities should be internally consistent',
   }
   if (!value) {
     pushIssue(issues, 'yellow', 'plugins_probe_missing', '插件/Widevine probe 缺失。', null, 'pluginsWidevine result')
     return matrixEntry(value, expected, issues)
   }
+  const pdfMimeTypes = Array.isArray(value.mimeTypes) ? value.mimeTypes.filter(function (item) { return /pdf/i.test(String(item.type || item.description || '')) }) : []
+  if (value.pdfViewerEnabled === true && (!value.pdfPluginNames || value.pdfPluginNames.length === 0 || pdfMimeTypes.length === 0)) {
+    pushIssue(issues, 'yellow', 'pdf_viewer_incomplete', 'PDF Viewer 为 true，但 plugins/mimeTypes 未形成完整组合。', { pdfPluginNames: value.pdfPluginNames, pdfMimeTypes }, 'PDF plugin and application/pdf mimeType')
+  }
   if (value.pdfViewerEnabled !== true && (!value.pdfPluginNames || value.pdfPluginNames.length === 0)) {
     pushIssue(issues, 'yellow', 'pdf_viewer_missing', '未观测到 PDF Viewer。', value.pdfViewerEnabled, 'pdfViewerEnabled=true or PDF plugin')
   }
+  if (value.widevine && value.widevine.supported === true && value.widevine.error) {
+    pushIssue(issues, 'yellow', 'widevine_supported_with_error', 'Widevine 同时显示 supported 和 error，EME 状态不一致。', value.widevine, 'supported without error')
+  }
   if (value.widevine && value.widevine.error) {
     pushIssue(issues, 'yellow', 'widevine_unavailable', 'Widevine 不可用或 EME 探测失败。', value.widevine.error, 'supported or known unavailable by runtime')
+  }
+  const caps = value.mediaCapabilities || {}
+  const codecs = caps.codecs || {}
+  const codecSupport = function (name) {
+    const item = codecs[name] || {}
+    return Boolean(item.canPlayType) || item.mediaSource === true
+  }
+  if (value.widevine && value.widevine.supported === true && (!codecSupport('h264') || !codecSupport('aac'))) {
+    pushIssue(issues, 'red', 'widevine_without_mp4_codecs', 'Widevine 可用但 H.264/AAC 能力不足，DRM/codec 矩阵矛盾。', caps, 'h264+aac support')
+  }
+  if (!caps.mediaSourceSupported) {
+    pushIssue(issues, 'yellow', 'media_source_missing', 'MediaSource 不可用，现代 Chromium 媒体能力可能异常。', caps.mediaSourceSupported, 'MediaSource')
   }
   return matrixEntry(value, expected, issues)
 }
@@ -1734,6 +1876,7 @@ function buildGeolocationDimension(localProbe) {
 function buildFingerprintMatrix(localProbe, headerEcho) {
   const matrix = {
     uaChHeaders: buildUACHHeadersDimension(localProbe, headerEcho),
+    viewportGeometry: buildViewportGeometryDimension(localProbe),
     gpuWebgpu: buildGpuWebgpuDimension(localProbe),
     storage: buildStorageDimension(localProbe),
     webrtc: buildWebRTCDimension(localProbe),

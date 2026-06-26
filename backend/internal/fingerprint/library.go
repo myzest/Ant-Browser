@@ -54,6 +54,7 @@ type Profile struct {
 	Media          MediaDevices
 	Privacy        Privacy
 	ClientHints    ClientHints
+	MediaCaps      MediaCapabilityProfile
 	DeviceClass    string
 }
 
@@ -113,6 +114,38 @@ type ClientHintBrand struct {
 	Version string `json:"version"`
 }
 
+type MediaCapabilityProfile struct {
+	RuntimeCoverage string             `json:"runtimeCoverage"`
+	ChromeMajor     string             `json:"chromeMajor"`
+	PDFViewer       bool               `json:"pdfViewer"`
+	WidevinePresent bool               `json:"widevinePresent"`
+	EMESupported    bool               `json:"emeSupported"`
+	Plugins         []PluginCapability `json:"plugins"`
+	MimeTypes       []MimeCapability   `json:"mimeTypes"`
+	Codecs          CodecCapabilities  `json:"codecs"`
+	Notes           []string           `json:"notes,omitempty"`
+}
+
+type PluginCapability struct {
+	Name        string `json:"name"`
+	Filename    string `json:"filename"`
+	Description string `json:"description"`
+}
+
+type MimeCapability struct {
+	Type        string `json:"type"`
+	Suffixes    string `json:"suffixes"`
+	Description string `json:"description"`
+}
+
+type CodecCapabilities struct {
+	H264 bool `json:"h264"`
+	AAC  bool `json:"aac"`
+	VP9  bool `json:"vp9"`
+	AV1  bool `json:"av1"`
+	HEVC bool `json:"hevc"`
+}
+
 type ValidationIssue struct {
 	Code     string `json:"code"`
 	Severity string `json:"severity"`
@@ -152,6 +185,7 @@ type Library struct {
 	screen      ScreenDistribution
 	media       map[string][]MediaDevices
 	clientHints map[string]ClientHints
+	mediaCaps   map[string]MediaCapabilityProfile
 }
 
 type Region struct {
@@ -215,7 +249,11 @@ func LoadLibraryFromData() (*Library, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Library{profiles: profiles, regions: regions, fonts: fonts, webgl: webgl, screen: screen, media: media, clientHints: clientHints}, nil
+	mediaCaps, err := loadMediaCapabilitiesFromData()
+	if err != nil {
+		return nil, err
+	}
+	return &Library{profiles: profiles, regions: regions, fonts: fonts, webgl: webgl, screen: screen, media: media, clientHints: clientHints, mediaCaps: mediaCaps}, nil
 }
 
 func StableSeed(profileID string) int64 {
@@ -276,6 +314,9 @@ func Generate(lib *Library, opts GenerateOptions) (*Profile, error) {
 	if len(lib.clientHints) == 0 {
 		lib.clientHints = defaultClientHints()
 	}
+	if len(lib.mediaCaps) == 0 {
+		lib.mediaCaps = defaultMediaCapabilities()
+	}
 	platform := NormalizePlatform(opts.Platform)
 	regionMode := NormalizeRegionMode(opts.RegionMode)
 	locale, timezone, country := lib.localeTimezone(opts.Country, opts.Locale, opts.Timezone)
@@ -316,6 +357,7 @@ func Generate(lib *Library, opts GenerateOptions) (*Profile, error) {
 	picked.Timezone = timezone
 	picked.AcceptLanguage, picked.Languages = lib.languageStack(country, locale)
 	picked.ClientHints = pickClientHints(platform, picked.ClientHints, lib.clientHints)
+	picked.MediaCaps = pickMediaCapabilities(platform, picked.MediaCaps, lib.mediaCaps)
 	applyDistributionData(&picked, lib, seed)
 	if picked.Screen.AvailWidth <= 0 {
 		picked.Screen.AvailWidth = picked.Screen.Width
@@ -554,6 +596,11 @@ func AcceptLanguageDefaults(country string, locale string) string {
 	return acceptLanguage
 }
 
+func MediaCapabilitiesForPlatform(platform string) MediaCapabilityProfile {
+	lib := LoadLibrary()
+	return pickMediaCapabilities(platform, MediaCapabilityProfile{}, lib.mediaCaps)
+}
+
 func normalizeDeviceClass(value string) string {
 	switch strings.ToLower(strings.TrimSpace(value)) {
 	case "office", "laptop", "workstation", "gaming", "light_linux":
@@ -679,6 +726,30 @@ func loadClientHintsFromData() (map[string]ClientHints, error) {
 	return out, nil
 }
 
+func loadMediaCapabilitiesFromData() (map[string]MediaCapabilityProfile, error) {
+	payload, err := fingerprintDataFS.ReadFile("data/media_capabilities.json")
+	if err != nil {
+		return nil, err
+	}
+	var raw map[string]MediaCapabilityProfile
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		return nil, err
+	}
+	out := map[string]MediaCapabilityProfile{}
+	for platform, caps := range raw {
+		key := NormalizePlatform(platform)
+		caps = normalizeMediaCapabilityProfile(caps)
+		if len(caps.Plugins) == 0 && len(caps.MimeTypes) == 0 {
+			continue
+		}
+		out[key] = caps
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("fingerprint media capability data is empty")
+	}
+	return out, nil
+}
+
 func loadFontsFromData() (map[string]FontPool, error) {
 	payload, err := fingerprintDataFS.ReadFile("data/fonts.json")
 	if err != nil {
@@ -796,6 +867,7 @@ func defaultLibrary() *Library {
 		screen:      defaultScreenDistribution(),
 		media:       defaultMediaPools(),
 		clientHints: defaultClientHints(),
+		mediaCaps:   defaultMediaCapabilities(),
 	}
 }
 
@@ -898,6 +970,37 @@ func defaultMediaPools() map[string][]MediaDevices {
 		"workstation": {{1, 2, 2}},
 		"gaming":      {{1, 2, 2}},
 		"light_linux": {{0, 1, 1}},
+	}
+}
+
+func defaultMediaCapabilities() map[string]MediaCapabilityProfile {
+	return map[string]MediaCapabilityProfile{
+		PlatformWindows: defaultMediaCapabilitiesForPlatform(true, true, CodecCapabilities{H264: true, AAC: true, VP9: true, AV1: true}),
+		PlatformMac:     defaultMediaCapabilitiesForPlatform(true, true, CodecCapabilities{H264: true, AAC: true, VP9: true, AV1: true}),
+		PlatformLinux:   defaultMediaCapabilitiesForPlatform(true, false, CodecCapabilities{VP9: true, AV1: true}),
+	}
+}
+
+func defaultMediaCapabilitiesForPlatform(pdfViewer bool, widevine bool, codecs CodecCapabilities) MediaCapabilityProfile {
+	return MediaCapabilityProfile{
+		RuntimeCoverage: "capability-matrix",
+		ChromeMajor:     "core-major",
+		PDFViewer:       pdfViewer,
+		WidevinePresent: widevine,
+		EMESupported:    widevine,
+		Plugins: []PluginCapability{
+			{Name: "PDF Viewer", Filename: "internal-pdf-viewer", Description: "Portable Document Format"},
+			{Name: "Chrome PDF Viewer", Filename: "internal-pdf-viewer", Description: "Portable Document Format"},
+			{Name: "Chromium PDF Viewer", Filename: "internal-pdf-viewer", Description: "Portable Document Format"},
+			{Name: "Microsoft Edge PDF Viewer", Filename: "internal-pdf-viewer", Description: "Portable Document Format"},
+			{Name: "WebKit built-in PDF", Filename: "internal-pdf-viewer", Description: "Portable Document Format"},
+		},
+		MimeTypes: []MimeCapability{
+			{Type: "application/pdf", Suffixes: "pdf", Description: "Portable Document Format"},
+			{Type: "text/pdf", Suffixes: "pdf", Description: "Portable Document Format"},
+		},
+		Codecs: codecs,
+		Notes:  []string{"Capability matrix only; runtime spoofing must be backed by Chromium core support or measured browser capabilities."},
 	}
 }
 
@@ -1031,6 +1134,72 @@ func pickClientHints(platform string, current ClientHints, pools map[string]Clie
 		return current
 	}
 	return hints
+}
+
+func pickMediaCapabilities(platform string, current MediaCapabilityProfile, pools map[string]MediaCapabilityProfile) MediaCapabilityProfile {
+	caps, ok := pools[NormalizePlatform(platform)]
+	if !ok {
+		return current
+	}
+	return caps
+}
+
+func normalizeMediaCapabilityProfile(caps MediaCapabilityProfile) MediaCapabilityProfile {
+	caps.RuntimeCoverage = strings.TrimSpace(caps.RuntimeCoverage)
+	if caps.RuntimeCoverage == "" {
+		caps.RuntimeCoverage = "capability-matrix"
+	}
+	caps.ChromeMajor = strings.TrimSpace(caps.ChromeMajor)
+	if caps.ChromeMajor == "" {
+		caps.ChromeMajor = "core-major"
+	}
+	caps.Plugins = normalizePluginCapabilities(caps.Plugins)
+	caps.MimeTypes = normalizeMimeCapabilities(caps.MimeTypes)
+	caps.Notes = normalizeUniqueStrings(caps.Notes)
+	return caps
+}
+
+func normalizePluginCapabilities(items []PluginCapability) []PluginCapability {
+	seen := map[string]struct{}{}
+	out := make([]PluginCapability, 0, len(items))
+	for _, item := range items {
+		name := strings.TrimSpace(item.Name)
+		if name == "" {
+			continue
+		}
+		key := strings.ToLower(name + "|" + strings.TrimSpace(item.Filename))
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
+		out = append(out, PluginCapability{
+			Name:        name,
+			Filename:    strings.TrimSpace(item.Filename),
+			Description: strings.TrimSpace(item.Description),
+		})
+	}
+	return out
+}
+
+func normalizeMimeCapabilities(items []MimeCapability) []MimeCapability {
+	seen := map[string]struct{}{}
+	out := make([]MimeCapability, 0, len(items))
+	for _, item := range items {
+		mimeType := strings.ToLower(strings.TrimSpace(item.Type))
+		if mimeType == "" {
+			continue
+		}
+		if _, ok := seen[mimeType]; ok {
+			continue
+		}
+		seen[mimeType] = struct{}{}
+		out = append(out, MimeCapability{
+			Type:        mimeType,
+			Suffixes:    strings.TrimSpace(item.Suffixes),
+			Description: strings.TrimSpace(item.Description),
+		})
+	}
+	return out
 }
 
 func normalizeUniqueStrings(items []string) []string {
