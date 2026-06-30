@@ -86,6 +86,18 @@ type MediaDevices struct {
 	Speakers    int
 }
 
+type DeviceTemplate struct {
+	ID          string
+	Weight      int
+	Platform    string
+	DeviceClass string
+	Screen      Screen
+	Hardware    Hardware
+	WebGL       WebGL
+	Fonts       []string
+	Media       MediaDevices
+}
+
 type Privacy struct {
 	DoNotTrack   bool
 	WebRTCIP     string
@@ -178,14 +190,15 @@ type Summary struct {
 }
 
 type Library struct {
-	profiles    []Profile
-	regions     map[string]Region
-	fonts       map[string]FontPool
-	webgl       map[string][]WebGL
-	screen      ScreenDistribution
-	media       map[string][]MediaDevices
-	clientHints map[string]ClientHints
-	mediaCaps   map[string]MediaCapabilityProfile
+	profiles        []Profile
+	regions         map[string]Region
+	fonts           map[string]FontPool
+	webgl           map[string][]WebGL
+	screen          ScreenDistribution
+	media           map[string][]MediaDevices
+	clientHints     map[string]ClientHints
+	mediaCaps       map[string]MediaCapabilityProfile
+	deviceTemplates []DeviceTemplate
 }
 
 type Region struct {
@@ -253,7 +266,7 @@ func LoadLibraryFromData() (*Library, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Library{profiles: profiles, regions: regions, fonts: fonts, webgl: webgl, screen: screen, media: media, clientHints: clientHints, mediaCaps: mediaCaps}, nil
+	return &Library{profiles: profiles, regions: regions, fonts: fonts, webgl: webgl, screen: screen, media: media, clientHints: clientHints, mediaCaps: mediaCaps, deviceTemplates: stableDeviceTemplates()}, nil
 }
 
 func StableSeed(profileID string) int64 {
@@ -317,6 +330,9 @@ func Generate(lib *Library, opts GenerateOptions) (*Profile, error) {
 	if len(lib.mediaCaps) == 0 {
 		lib.mediaCaps = defaultMediaCapabilities()
 	}
+	if lib.deviceTemplates == nil && isDefaultFingerprintDistribution(lib) {
+		lib.deviceTemplates = stableDeviceTemplates()
+	}
 	platform := NormalizePlatform(opts.Platform)
 	regionMode := NormalizeRegionMode(opts.RegionMode)
 	locale, timezone, country := lib.localeTimezone(opts.Country, opts.Locale, opts.Timezone)
@@ -355,6 +371,9 @@ func Generate(lib *Library, opts GenerateOptions) (*Profile, error) {
 	picked.Country = country
 	picked.Locale = locale
 	picked.Timezone = timezone
+	if deviceClass != "" {
+		picked.DeviceClass = deviceClass
+	}
 	picked.AcceptLanguage, picked.Languages = lib.languageStack(country, locale)
 	picked.ClientHints = pickClientHints(platform, picked.ClientHints, lib.clientHints)
 	picked.MediaCaps = pickMediaCapabilities(platform, picked.MediaCaps, lib.mediaCaps)
@@ -382,10 +401,175 @@ func applyDistributionData(profile *Profile, lib *Library, seed int64) {
 		return
 	}
 	platform := NormalizePlatform(profile.Platform)
+	if template, ok := pickDeviceTemplate(lib.deviceTemplates, platform, profile.DeviceClass, seed); ok {
+		applyDeviceTemplate(profile, template)
+		return
+	}
 	profile.Fonts = pickFonts(platform, profile.Fonts, lib.fonts, seed)
 	profile.WebGL = pickWebGL(platform, profile.DeviceClass, profile.WebGL, lib.webgl, seed)
 	profile.Screen = pickScreen(platform, profile.DeviceClass, profile.Screen, lib.screen, seed)
 	profile.Media = pickMedia(profile.DeviceClass, profile.Media, lib.media, seed)
+}
+
+func pickDeviceTemplate(templates []DeviceTemplate, platform string, deviceClass string, seed int64) (DeviceTemplate, bool) {
+	if len(templates) == 0 {
+		return DeviceTemplate{}, false
+	}
+	platform = NormalizePlatform(platform)
+	deviceClass = normalizeDeviceClass(deviceClass)
+	candidates := make([]DeviceTemplate, 0)
+	for _, item := range templates {
+		if NormalizePlatform(item.Platform) != platform {
+			continue
+		}
+		if deviceClass != "" && normalizeDeviceClass(item.DeviceClass) != "" && normalizeDeviceClass(item.DeviceClass) != deviceClass {
+			continue
+		}
+		candidates = append(candidates, item)
+	}
+	if len(candidates) == 0 && deviceClass != "" {
+		for _, item := range templates {
+			if NormalizePlatform(item.Platform) == platform {
+				candidates = append(candidates, item)
+			}
+		}
+	}
+	if len(candidates) == 0 {
+		return DeviceTemplate{}, false
+	}
+	return weightedPickDeviceTemplate(candidates, seed), true
+}
+
+func applyDeviceTemplate(profile *Profile, template DeviceTemplate) {
+	if profile == nil {
+		return
+	}
+	profile.DeviceClass = defaultString(profile.DeviceClass, template.DeviceClass)
+	profile.Screen = template.Screen
+	profile.Hardware.HardwareConcurrency = defaultInt(template.Hardware.HardwareConcurrency, profile.Hardware.HardwareConcurrency)
+	profile.Hardware.DeviceMemory = defaultInt(template.Hardware.DeviceMemory, profile.Hardware.DeviceMemory)
+	profile.Hardware.TouchPoints = template.Hardware.TouchPoints
+	profile.WebGL = template.WebGL
+	profile.Fonts = normalizeUniqueStrings(template.Fonts)
+	profile.Media = template.Media
+}
+
+func isDefaultFingerprintDistribution(lib *Library) bool {
+	if lib == nil {
+		return false
+	}
+	return sameProfileIDs(lib.profiles, defaultProfiles()) &&
+		sameFontPools(lib.fonts, defaultFontPools()) &&
+		sameWebGLPools(lib.webgl, defaultWebGLPools()) &&
+		sameScreenDistribution(lib.screen, defaultScreenDistribution()) &&
+		sameMediaPools(lib.media, defaultMediaPools())
+}
+
+func sameProfileIDs(left []Profile, right []Profile) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if strings.TrimSpace(left[i].ID) != strings.TrimSpace(right[i].ID) ||
+			NormalizePlatform(left[i].Platform) != NormalizePlatform(right[i].Platform) ||
+			normalizeDeviceClass(left[i].DeviceClass) != normalizeDeviceClass(right[i].DeviceClass) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameFontPools(left map[string]FontPool, right map[string]FontPool) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for platform, leftPool := range left {
+		rightPool, ok := right[platform]
+		if !ok || !stringSlicesEqual(leftPool.MarkerFonts, rightPool.MarkerFonts) || !stringSlicesEqual(leftPool.OptionalFonts, rightPool.OptionalFonts) {
+			return false
+		}
+	}
+	return true
+}
+
+func sameWebGLPools(left map[string][]WebGL, right map[string][]WebGL) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for platform, leftItems := range left {
+		rightItems, ok := right[platform]
+		if !ok || len(leftItems) != len(rightItems) {
+			return false
+		}
+		for i := range leftItems {
+			if !strings.EqualFold(strings.TrimSpace(leftItems[i].Vendor), strings.TrimSpace(rightItems[i].Vendor)) ||
+				!strings.EqualFold(strings.TrimSpace(leftItems[i].Renderer), strings.TrimSpace(rightItems[i].Renderer)) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func sameScreenDistribution(left ScreenDistribution, right ScreenDistribution) bool {
+	return stringSlicesEqual(left.Desktop, right.Desktop) &&
+		stringSlicesEqual(left.Laptop, right.Laptop) &&
+		intSlicesEqual(left.ColorDepth, right.ColorDepth) &&
+		floatSlicesEqual(left.DevicePixelRatio, right.DevicePixelRatio)
+}
+
+func sameMediaPools(left map[string][]MediaDevices, right map[string][]MediaDevices) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for class, leftItems := range left {
+		rightItems, ok := right[class]
+		if !ok || len(leftItems) != len(rightItems) {
+			return false
+		}
+		for i := range leftItems {
+			if leftItems[i] != rightItems[i] {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func stringSlicesEqual(left []string, right []string) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if strings.TrimSpace(left[i]) != strings.TrimSpace(right[i]) {
+			return false
+		}
+	}
+	return true
+}
+
+func intSlicesEqual(left []int, right []int) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
+}
+
+func floatSlicesEqual(left []float64, right []float64) bool {
+	if len(left) != len(right) {
+		return false
+	}
+	for i := range left {
+		if left[i] != right[i] {
+			return false
+		}
+	}
+	return true
 }
 
 func Args(profile *Profile) []string {
@@ -518,6 +702,30 @@ func weightedPick(candidates []Profile, seed int64) Profile {
 		return candidates[int(seed)%len(candidates)]
 	}
 	r := rand.New(rand.NewSource(seed))
+	n := r.Intn(total)
+	for _, candidate := range candidates {
+		if candidate.Weight <= 0 {
+			continue
+		}
+		if n < candidate.Weight {
+			return candidate
+		}
+		n -= candidate.Weight
+	}
+	return candidates[len(candidates)-1]
+}
+
+func weightedPickDeviceTemplate(candidates []DeviceTemplate, seed int64) DeviceTemplate {
+	total := 0
+	for _, candidate := range candidates {
+		if candidate.Weight > 0 {
+			total += candidate.Weight
+		}
+	}
+	if total <= 0 {
+		return candidates[int(seed)%len(candidates)]
+	}
+	r := rand.New(rand.NewSource(seed + 409))
 	n := r.Intn(total)
 	for _, candidate := range candidates {
 		if candidate.Weight <= 0 {
@@ -860,14 +1068,15 @@ func loadMediaFromData() (map[string][]MediaDevices, error) {
 
 func defaultLibrary() *Library {
 	return &Library{
-		profiles:    defaultProfiles(),
-		regions:     defaultRegions(),
-		fonts:       defaultFontPools(),
-		webgl:       defaultWebGLPools(),
-		screen:      defaultScreenDistribution(),
-		media:       defaultMediaPools(),
-		clientHints: defaultClientHints(),
-		mediaCaps:   defaultMediaCapabilities(),
+		profiles:        defaultProfiles(),
+		regions:         defaultRegions(),
+		fonts:           defaultFontPools(),
+		webgl:           defaultWebGLPools(),
+		screen:          defaultScreenDistribution(),
+		media:           defaultMediaPools(),
+		clientHints:     defaultClientHints(),
+		mediaCaps:       defaultMediaCapabilities(),
+		deviceTemplates: stableDeviceTemplates(),
 	}
 }
 
@@ -1001,6 +1210,46 @@ func defaultMediaCapabilitiesForPlatform(pdfViewer bool, widevine bool, codecs C
 		},
 		Codecs: codecs,
 		Notes:  []string{"Capability matrix only; runtime spoofing must be backed by Chromium core support or measured browser capabilities."},
+	}
+}
+
+func stableDeviceTemplates() []DeviceTemplate {
+	return []DeviceTemplate{
+		deviceTemplate("win_laptop_1366_intel", 80, PlatformWindows, "laptop", "1366,768", "1366,728", 1, 24, 4, 4, WebGL{"Intel", "Intel(R) UHD Graphics 620"}, []string{"Segoe UI", "Calibri", "Cambria Math", "Consolas", "Arial", "Tahoma", "Times New Roman", "Verdana", "Microsoft YaHei"}, MediaDevices{1, 1, 1}),
+		deviceTemplate("win_office_1920_intel", 120, PlatformWindows, "office", "1920,1080", "1920,1040", 1, 24, 8, 8, WebGL{"Intel", "Intel(R) UHD Graphics 630"}, []string{"Segoe UI", "Calibri", "Cambria Math", "Consolas", "Arial", "Tahoma", "Times New Roman", "Verdana", "Microsoft YaHei", "SimSun"}, MediaDevices{1, 1, 1}),
+		deviceTemplate("win_workstation_2560_nvidia", 45, PlatformWindows, "workstation", "2560,1440", "2560,1400", 1, 24, 16, 16, WebGL{"NVIDIA", "NVIDIA GeForce RTX 3060"}, []string{"Segoe UI", "Calibri", "Cambria Math", "Consolas", "Arial", "Tahoma", "Times New Roman", "Verdana"}, MediaDevices{1, 2, 2}),
+		deviceTemplate("win_gaming_2560_nvidia", 35, PlatformWindows, "gaming", "2560,1440", "2560,1400", 1, 24, 16, 16, WebGL{"NVIDIA", "NVIDIA GeForce RTX 3060"}, []string{"Segoe UI", "Calibri", "Cambria Math", "Consolas", "Arial", "Tahoma", "Times New Roman", "Verdana"}, MediaDevices{1, 2, 2}),
+		deviceTemplate("mac_office_1440_apple", 105, PlatformMac, "office", "1440,900", "1440,826", 2, 24, 8, 8, WebGL{"Apple", "Apple GPU"}, []string{"Helvetica Neue", "PingFang SC", "Menlo", "Monaco", "Times New Roman", "Apple Color Emoji", "Helvetica"}, MediaDevices{1, 1, 1}),
+		deviceTemplate("mac_retina_1440_apple", 130, PlatformMac, "laptop", "1440,900", "1440,826", 2, 24, 8, 8, WebGL{"Apple", "Apple GPU"}, []string{"Helvetica Neue", "PingFang SC", "Menlo", "Monaco", "Times New Roman", "Apple Color Emoji", "Helvetica"}, MediaDevices{1, 1, 1}),
+		deviceTemplate("mac_retina_1512_apple", 95, PlatformMac, "laptop", "1512,982", "1512,900", 2, 24, 8, 8, WebGL{"Apple", "Apple GPU"}, []string{"Helvetica Neue", "PingFang SC", "Menlo", "Monaco", "Times New Roman", "Apple Color Emoji", "Helvetica"}, MediaDevices{1, 1, 1}),
+		deviceTemplate("mac_workstation_1728_apple", 55, PlatformMac, "workstation", "1728,1117", "1728,1035", 2, 24, 10, 16, WebGL{"Apple", "Apple GPU"}, []string{"Helvetica Neue", "PingFang SC", "Menlo", "Monaco", "Times New Roman", "Apple Color Emoji", "Helvetica"}, MediaDevices{1, 2, 2}),
+		deviceTemplate("mac_gaming_1728_apple", 25, PlatformMac, "gaming", "1728,1117", "1728,1035", 2, 24, 10, 16, WebGL{"Apple", "Apple GPU"}, []string{"Helvetica Neue", "PingFang SC", "Menlo", "Monaco", "Times New Roman", "Apple Color Emoji", "Helvetica"}, MediaDevices{1, 2, 2}),
+		deviceTemplate("linux_laptop_1366_mesa", 70, PlatformLinux, "light_linux", "1366,768", "1366,728", 1, 24, 4, 4, WebGL{"Intel", "Mesa Intel(R) HD Graphics 520"}, []string{"Noto Sans", "Noto Color Emoji", "Arimo", "Cousine", "Tinos", "Noto Sans CJK SC", "Liberation Sans", "DejaVu Sans"}, MediaDevices{0, 1, 1}),
+		deviceTemplate("linux_office_1920_mesa", 95, PlatformLinux, "office", "1920,1080", "1920,1040", 1, 24, 8, 8, WebGL{"Intel", "Mesa Intel(R) UHD Graphics 620"}, []string{"Noto Sans", "Noto Color Emoji", "Arimo", "Cousine", "Tinos", "Noto Sans CJK SC", "Liberation Sans", "DejaVu Sans"}, MediaDevices{0, 1, 1}),
+		deviceTemplate("linux_workstation_1920_amd", 35, PlatformLinux, "workstation", "1920,1080", "1920,1040", 1, 24, 8, 8, WebGL{"AMD", "Mesa AMD Radeon Graphics"}, []string{"Noto Sans", "Noto Color Emoji", "Arimo", "Cousine", "Tinos", "Liberation Sans", "DejaVu Sans"}, MediaDevices{0, 1, 1}),
+		deviceTemplate("linux_gaming_1920_amd", 25, PlatformLinux, "gaming", "1920,1080", "1920,1040", 1, 24, 8, 8, WebGL{"AMD", "Mesa AMD Radeon Graphics"}, []string{"Noto Sans", "Noto Color Emoji", "Arimo", "Cousine", "Tinos", "Liberation Sans", "DejaVu Sans"}, MediaDevices{0, 1, 1}),
+	}
+}
+
+func deviceTemplate(id string, weight int, platform string, deviceClass string, resolution string, avail string, dpr float64, colorDepth int, concurrency int, memory int, webgl WebGL, fonts []string, media MediaDevices) DeviceTemplate {
+	width, height := parseResolution(resolution)
+	availWidth, availHeight := parseResolution(avail)
+	if availWidth <= 0 {
+		availWidth = width
+	}
+	if availHeight <= 0 || availHeight > height {
+		availHeight = height - defaultWindowChromeTop(platform)
+	}
+	return DeviceTemplate{
+		ID:          id,
+		Weight:      weight,
+		Platform:    NormalizePlatform(platform),
+		DeviceClass: normalizeDeviceClass(deviceClass),
+		Screen:      Screen{Width: width, Height: height, AvailWidth: availWidth, AvailHeight: availHeight, ColorDepth: colorDepth, DevicePixelRatio: dpr},
+		Hardware:    Hardware{HardwareConcurrency: concurrency, DeviceMemory: memory, TouchPoints: 0},
+		WebGL:       webgl,
+		Fonts:       normalizeUniqueStrings(fonts),
+		Media:       media,
 	}
 }
 

@@ -116,6 +116,7 @@ const WEBGL_RENDERER_OPTIONS: Record<string, { value: string; label: string }[]>
   ],
   Apple: [
     { value: '', label: '不设置' },
+    { value: 'Apple GPU', label: 'Apple GPU' },
     { value: 'Apple M1', label: 'Apple M1' },
     { value: 'Apple M2', label: 'Apple M2' },
     { value: 'Apple M3', label: 'Apple M3' },

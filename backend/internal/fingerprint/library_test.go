@@ -90,6 +90,97 @@ func TestGenerateIsStableForSameOptions(t *testing.T) {
 	}
 }
 
+func TestGenerateUsesStableDeviceTemplates(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		platform   string
+		device     string
+		wantVendor string
+		wantDPR    float64
+		wantDepth  int
+		wantFont   string
+	}{
+		{name: "windows", platform: PlatformWindows, device: "office", wantVendor: "Intel", wantDPR: 1, wantDepth: 24, wantFont: "Segoe UI"},
+		{name: "mac", platform: PlatformMac, device: "laptop", wantVendor: "Apple", wantDPR: 2, wantDepth: 24, wantFont: "Helvetica Neue"},
+		{name: "mac office", platform: PlatformMac, device: "office", wantVendor: "Apple", wantDPR: 2, wantDepth: 24, wantFont: "Helvetica Neue"},
+		{name: "linux", platform: PlatformLinux, device: "office", wantVendor: "Intel", wantDPR: 1, wantDepth: 24, wantFont: "Noto Sans"},
+		{name: "windows gaming", platform: PlatformWindows, device: "gaming", wantVendor: "NVIDIA", wantDPR: 1, wantDepth: 24, wantFont: "Segoe UI"},
+		{name: "mac gaming", platform: PlatformMac, device: "gaming", wantVendor: "Apple", wantDPR: 2, wantDepth: 24, wantFont: "Helvetica Neue"},
+		{name: "linux gaming", platform: PlatformLinux, device: "gaming", wantVendor: "AMD", wantDPR: 1, wantDepth: 24, wantFont: "Noto Sans"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			got, err := Generate(LoadLibrary(), GenerateOptions{ProfileID: "template-" + tt.name, Platform: tt.platform, DeviceClass: tt.device})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.WebGL.Vendor != tt.wantVendor {
+				t.Fatalf("expected %s WebGL vendor %q, got %#v", tt.platform, tt.wantVendor, got.WebGL)
+			}
+			if got.Screen.DevicePixelRatio != tt.wantDPR || got.Screen.ColorDepth != tt.wantDepth {
+				t.Fatalf("expected stable screen dpr/depth %v/%d, got %#v", tt.wantDPR, tt.wantDepth, got.Screen)
+			}
+			if got.Screen.AvailWidth != got.Screen.Width || got.Screen.AvailHeight <= 0 || got.Screen.AvailHeight > got.Screen.Height {
+				t.Fatalf("expected coherent screen avail, got %#v", got.Screen)
+			}
+			if !contains(got.Fonts, tt.wantFont) {
+				t.Fatalf("expected platform marker font %q, got %#v", tt.wantFont, got.Fonts)
+			}
+			if report := Health(Args(got)); report.Status == "red" {
+				t.Fatalf("generated stable template should not be red: %#v args=%v", report, Args(got))
+			}
+		})
+	}
+}
+
+func TestDefaultMacArgsUseOfficeTemplate(t *testing.T) {
+	t.Parallel()
+
+	got, err := Generate(LoadLibrary(), GenerateOptions{ProfileID: "default-mac", Platform: PlatformMac, DeviceClass: "office"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.DeviceClass != "office" {
+		t.Fatalf("expected explicit office class to be preserved, got %q", got.DeviceClass)
+	}
+	if got.Screen.Width != 1440 || got.Screen.Height != 900 || got.Screen.AvailHeight != 826 {
+		t.Fatalf("expected stable mac office screen, got %#v", got.Screen)
+	}
+	if got.Hardware.HardwareConcurrency != 8 || got.Hardware.DeviceMemory != 8 || got.Media != (MediaDevices{Cameras: 1, Microphones: 1, Speakers: 1}) {
+		t.Fatalf("expected stable mac office hardware/media, got hardware=%#v media=%#v", got.Hardware, got.Media)
+	}
+}
+
+func TestGenerateDoesNotAutoTemplateWhenCustomFontsOrMediaDiffer(t *testing.T) {
+	t.Parallel()
+
+	base := defaultLibrary()
+	base.deviceTemplates = nil
+	base.fonts = defaultFontPools()
+	base.fonts[PlatformWindows] = FontPool{
+		MarkerFonts:   []string{"Custom Font"},
+		OptionalFonts: []string{"Custom Optional"},
+	}
+	base.media = defaultMediaPools()
+	base.media["office"] = []MediaDevices{{Cameras: 2, Microphones: 3, Speakers: 4}}
+
+	got, err := Generate(base, GenerateOptions{ProfileID: "custom-font-media", Platform: PlatformWindows, DeviceClass: "office"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !contains(got.Fonts, "Custom Font") || !contains(got.Fonts, "Custom Optional") {
+		t.Fatalf("expected custom font distribution to be preserved, got %#v", got.Fonts)
+	}
+	if got.Media != (MediaDevices{Cameras: 2, Microphones: 3, Speakers: 4}) {
+		t.Fatalf("expected custom media distribution to be preserved, got %#v", got.Media)
+	}
+}
+
 func TestStableSeedUsesPositiveChromiumSeedRange(t *testing.T) {
 	t.Parallel()
 

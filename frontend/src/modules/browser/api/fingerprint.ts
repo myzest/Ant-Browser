@@ -148,75 +148,67 @@ function splitLaunchArg(args: string[], index: number): { key: string; value: st
 
 function localFixture(platform: string, country?: string, locale?: string, timezone?: string, deviceClass?: string) {
   const region = localRegion(country, locale, timezone)
-  if (platform === 'mac') {
-    return {
-      brand: 'Chrome',
-      platform: 'mac',
-      lang: region.locale,
-      timezone: region.timezone,
-      resolution: deviceClass === 'workstation' ? '2560,1440' : '1440,900',
-      screenAvail: deviceClass === 'workstation' ? '2560,1366' : '1440,826',
-      devicePixelRatio: '2',
-      colorDepth: '24',
-      hardwareConcurrency: deviceClass === 'workstation' ? '10' : '8',
-      deviceMemory: deviceClass === 'workstation' ? '16' : '8',
-      canvasNoise: true,
-      audioNoise: true,
-      webglVendor: 'Apple',
-      webglRenderer: deviceClass === 'workstation' ? 'Apple M2' : 'Apple M1',
-      fonts: 'Arial,Helvetica,Helvetica Neue,Menlo,Monaco,PingFang SC,Times New Roman',
-      webrtcPolicy: 'disable_non_proxied_udp',
-      webrtcIP: 'auto',
-      doNotTrack: false,
-      touchPoints: '0',
-      mediaDevices: deviceClass === 'workstation' ? '1,2,2' : '1,1,1',
-    }
-  }
-  if (platform === 'linux') {
-    return {
-      brand: 'Chrome',
-      platform: 'linux',
-      lang: region.locale,
-      timezone: region.timezone,
-      resolution: deviceClass === 'light_linux' ? '1366,768' : '1920,1080',
-      screenAvail: deviceClass === 'light_linux' ? '1366,688' : '1920,1000',
-      devicePixelRatio: '1',
-      colorDepth: '24',
-      hardwareConcurrency: deviceClass === 'light_linux' ? '4' : '8',
-      deviceMemory: deviceClass === 'light_linux' ? '4' : '8',
-      canvasNoise: true,
-      audioNoise: true,
-      webglVendor: 'Intel',
-      webglRenderer: deviceClass === 'light_linux' ? 'Mesa Intel(R) HD Graphics 520' : 'Mesa Intel(R) UHD Graphics 620',
-      fonts: 'Arimo,Cousine,Tinos,Noto Sans,Noto Sans CJK SC,Noto Color Emoji',
-      webrtcPolicy: 'disable_non_proxied_udp',
-      webrtcIP: 'auto',
-      doNotTrack: false,
-      touchPoints: '0',
-      mediaDevices: deviceClass === 'light_linux' ? '0,1,1' : '0,1,1',
-    }
-  }
-  return {
+  const base = {
     brand: 'Chrome',
-    platform: 'windows',
     lang: region.locale,
     timezone: region.timezone,
-    resolution: deviceClass === 'gaming' ? '2560,1440' : deviceClass === 'laptop' ? '1366,768' : '1920,1080',
-    screenAvail: deviceClass === 'gaming' ? '2560,1400' : deviceClass === 'laptop' ? '1366,728' : '1920,1040',
-    devicePixelRatio: '1',
-    colorDepth: '24',
-    hardwareConcurrency: deviceClass === 'gaming' ? '16' : deviceClass === 'laptop' ? '4' : '8',
-    deviceMemory: deviceClass === 'gaming' ? '16' : deviceClass === 'laptop' ? '4' : '8',
     canvasNoise: true,
     audioNoise: true,
-    webglVendor: deviceClass === 'gaming' ? 'NVIDIA' : 'Intel',
-    webglRenderer: deviceClass === 'gaming' ? 'NVIDIA GeForce RTX 3060' : deviceClass === 'laptop' ? 'Intel(R) UHD Graphics 620' : 'Intel(R) UHD Graphics 630',
-    fonts: 'Arial,Calibri,Cambria Math,Consolas,Segoe UI,Tahoma,Times New Roman,Verdana,Microsoft YaHei',
     webrtcPolicy: 'disable_non_proxied_udp',
     webrtcIP: 'auto',
     doNotTrack: false,
     touchPoints: '0',
-    mediaDevices: deviceClass === 'gaming' ? '1,2,2' : '1,1,1',
+  }
+  if (platform === 'mac') {
+    const highPerformance = deviceClass === 'workstation' || deviceClass === 'gaming'
+    return {
+      ...base,
+      platform: 'mac',
+      resolution: highPerformance ? '1728,1117' : '1440,900',
+      screenAvail: highPerformance ? '1728,1035' : '1440,826',
+      devicePixelRatio: '2',
+      colorDepth: '24',
+      hardwareConcurrency: highPerformance ? '10' : '8',
+      deviceMemory: highPerformance ? '16' : '8',
+      webglVendor: 'Apple',
+      webglRenderer: 'Apple GPU',
+      fonts: 'Helvetica Neue,PingFang SC,Menlo,Monaco,Times New Roman,Apple Color Emoji,Helvetica',
+      mediaDevices: highPerformance ? '1,2,2' : '1,1,1',
+    }
+  }
+  if (platform === 'linux') {
+    const lightLinux = deviceClass === 'light_linux' || deviceClass === 'laptop'
+    const highPerformance = deviceClass === 'workstation' || deviceClass === 'gaming'
+    return {
+      ...base,
+      platform: 'linux',
+      resolution: lightLinux ? '1366,768' : '1920,1080',
+      screenAvail: lightLinux ? '1366,728' : '1920,1040',
+      devicePixelRatio: '1',
+      colorDepth: '24',
+      hardwareConcurrency: lightLinux ? '4' : '8',
+      deviceMemory: lightLinux ? '4' : '8',
+      webglVendor: highPerformance ? 'AMD' : 'Intel',
+      webglRenderer: highPerformance ? 'Mesa AMD Radeon Graphics' : lightLinux ? 'Mesa Intel(R) HD Graphics 520' : 'Mesa Intel(R) UHD Graphics 620',
+      fonts: highPerformance ? 'Noto Sans,Noto Color Emoji,Arimo,Cousine,Tinos,Liberation Sans,DejaVu Sans' : 'Noto Sans,Noto Color Emoji,Arimo,Cousine,Tinos,Noto Sans CJK SC,Liberation Sans,DejaVu Sans',
+      mediaDevices: '0,1,1',
+    }
+  }
+  const laptop = deviceClass === 'laptop'
+  const highPerformance = deviceClass === 'workstation' || deviceClass === 'gaming'
+  return {
+    ...base,
+    platform: 'windows',
+    resolution: highPerformance ? '2560,1440' : laptop ? '1366,768' : '1920,1080',
+    screenAvail: highPerformance ? '2560,1400' : laptop ? '1366,728' : '1920,1040',
+    devicePixelRatio: '1',
+    colorDepth: '24',
+    hardwareConcurrency: highPerformance ? '16' : laptop ? '4' : '8',
+    deviceMemory: highPerformance ? '16' : laptop ? '4' : '8',
+    webglVendor: highPerformance ? 'NVIDIA' : 'Intel',
+    webglRenderer: highPerformance ? 'NVIDIA GeForce RTX 3060' : laptop ? 'Intel(R) UHD Graphics 620' : 'Intel(R) UHD Graphics 630',
+    fonts: highPerformance ? 'Segoe UI,Calibri,Cambria Math,Consolas,Arial,Tahoma,Times New Roman,Verdana' : laptop ? 'Segoe UI,Calibri,Cambria Math,Consolas,Arial,Tahoma,Times New Roman,Verdana,Microsoft YaHei' : 'Segoe UI,Calibri,Cambria Math,Consolas,Arial,Tahoma,Times New Roman,Verdana,Microsoft YaHei,SimSun',
+    mediaDevices: highPerformance ? '1,2,2' : '1,1,1',
   }
 }
 
