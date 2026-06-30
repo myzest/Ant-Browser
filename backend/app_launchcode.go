@@ -22,7 +22,7 @@ func (a *App) StartInstanceWithParams(profileId string, params launchcode.Launch
 
 func normalizeStealthLaunchRequestParams(params launchcode.LaunchRequestParams) launchcode.LaunchRequestParams {
 	ctx := params.StealthContext
-	extra := make([]string, 0, len(params.LaunchArgs)+4)
+	extra := make([]string, 0, len(params.LaunchArgs)+5)
 	extra = append(extra, params.LaunchArgs...)
 
 	if locale := strings.TrimSpace(ctx.Locale); locale != "" {

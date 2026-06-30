@@ -826,10 +826,15 @@ func TestNormalizeStealthLaunchRequestParamsMapsLocaleTimezoneToArgs(t *testing.
 
 func TestCollectLaunchRuntimeWarningsDetectsWindowsFontMismatch(t *testing.T) {
 	original := hostFontListingForRuntimeWarning
+	originalGOOS := hostGOOSForRuntimeWarning
+	hostGOOSForRuntimeWarning = func() string { return "linux" }
 	hostFontListingForRuntimeWarning = func() (string, bool) {
 		return "Noto Sans\nDejaVu Sans\n", true
 	}
-	defer func() { hostFontListingForRuntimeWarning = original }()
+	defer func() {
+		hostFontListingForRuntimeWarning = original
+		hostGOOSForRuntimeWarning = originalGOOS
+	}()
 
 	warnings := collectLaunchRuntimeWarnings("profile-fonts", []string{
 		"--fingerprint-platform=windows",
@@ -839,17 +844,22 @@ func TestCollectLaunchRuntimeWarningsDetectsWindowsFontMismatch(t *testing.T) {
 	if len(warnings) == 0 {
 		t.Fatalf("expected Windows font runtime warning")
 	}
-	if !strings.Contains(warnings[0], "Windows 字体") {
+	if !strings.Contains(strings.Join(warnings, "\n"), "Windows 字体") {
 		t.Fatalf("unexpected font warning: %v", warnings)
 	}
 }
 
 func TestCollectLaunchRuntimeWarningsSkipsWhenWindowsFontsPresent(t *testing.T) {
 	original := hostFontListingForRuntimeWarning
+	originalGOOS := hostGOOSForRuntimeWarning
+	hostGOOSForRuntimeWarning = func() string { return "linux" }
 	hostFontListingForRuntimeWarning = func() (string, bool) {
 		return "Segoe UI\nCalibri\n", true
 	}
-	defer func() { hostFontListingForRuntimeWarning = original }()
+	defer func() {
+		hostFontListingForRuntimeWarning = original
+		hostGOOSForRuntimeWarning = originalGOOS
+	}()
 
 	warnings := collectLaunchRuntimeWarnings("profile-fonts", []string{
 		"--fingerprint-platform=windows",
@@ -860,6 +870,41 @@ func TestCollectLaunchRuntimeWarningsSkipsWhenWindowsFontsPresent(t *testing.T) 
 		if strings.Contains(warning, "Windows 字体") {
 			t.Fatalf("did not expect font mismatch warning when fonts are present: %v", warnings)
 		}
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsDetectsMacHostWindowsWebGLMismatch(t *testing.T) {
+	originalGOOS := hostGOOSForRuntimeWarning
+	hostGOOSForRuntimeWarning = func() string { return "darwin" }
+	defer func() { hostGOOSForRuntimeWarning = originalGOOS }()
+
+	warnings := collectLaunchRuntimeWarnings("profile-vm-risk", []string{
+		"--fingerprint-platform=windows",
+		"--fingerprint-webgl-vendor=Intel",
+		"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+	})
+
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "Virtual Machine") {
+		t.Fatalf("expected virtual machine risk warning for mac host + non-Apple WebGL, got=%v", warnings)
+	}
+	if !strings.Contains(joined, "宿主平台") {
+		t.Fatalf("expected host platform mismatch warning, got=%v", warnings)
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsDetectsVirtualWebGLRenderer(t *testing.T) {
+	t.Parallel()
+
+	warnings := collectLaunchRuntimeWarnings("profile-virtual-renderer", []string{
+		"--fingerprint-platform=linux",
+		"--fingerprint-webgl-vendor=Google Inc.",
+		"--fingerprint-webgl-renderer=Google SwiftShader",
+	})
+
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "WebGL") || !strings.Contains(joined, "虚拟化") {
+		t.Fatalf("expected virtual WebGL renderer warning, got=%v", warnings)
 	}
 }
 

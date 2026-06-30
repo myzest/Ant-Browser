@@ -10,11 +10,14 @@ import (
 )
 
 var hostFontListingForRuntimeWarning = defaultHostFontListingForRuntimeWarning
+var hostGOOSForRuntimeWarning = func() string { return goruntime.GOOS }
 
 func collectLaunchRuntimeWarnings(profileID string, args []string) []string {
 	_ = profileID
 	warnings := []string{}
 	warnings = append(warnings, launchContextDisciplineWarnings(args)...)
+	warnings = append(warnings, launchHostPlatformRuntimeWarnings(args)...)
+	warnings = append(warnings, launchWebGLRuntimeWarnings(args)...)
 	warnings = append(warnings, launchFontRuntimeWarnings(args)...)
 	return uniqueRuntimeWarnings(warnings)
 }
@@ -43,6 +46,39 @@ func launchContextDisciplineWarnings(args []string) []string {
 	return warnings
 }
 
+func launchHostPlatformRuntimeWarnings(args []string) []string {
+	values := parseLaunchArgValues(args)
+	platform := normalizeRuntimeWarningPlatform(values["--fingerprint-platform"])
+	hostPlatform := normalizeRuntimeWarningGOOS(hostGOOSForRuntimeWarning())
+	if platform == "" || hostPlatform == "" || platform == hostPlatform {
+		return nil
+	}
+	return []string{platformHostMismatchRuntimeWarning(hostPlatform, platform)}
+}
+
+func launchWebGLRuntimeWarnings(args []string) []string {
+	values := parseLaunchArgValues(args)
+	platform := normalizeRuntimeWarningPlatform(values["--fingerprint-platform"])
+	hostPlatform := normalizeRuntimeWarningGOOS(hostGOOSForRuntimeWarning())
+	vendor := strings.TrimSpace(values["--fingerprint-webgl-vendor"])
+	renderer := strings.TrimSpace(values["--fingerprint-webgl-renderer"])
+	if vendor == "" && renderer == "" {
+		return nil
+	}
+
+	combined := strings.ToLower(vendor + " " + renderer)
+	if containsAnyFold(combined, virtualWebGLRuntimeTells) {
+		return []string{"WebGL vendor/renderer 暴露虚拟化或软件渲染特征；Fingerprint Virtual Machine 信号可能升高，请优先使用真实 GPU 路径，避免 SwiftShader/llvmpipe/VirtualBox/VMware 等 renderer。"}
+	}
+	if hostPlatform == "mac" && platform != "" && platform != "mac" && !strings.Contains(combined, "apple") {
+		return []string{"当前宿主为 macOS，但 WebGL 指纹声明为非 Apple GPU；这类跨平台 GPU 组合容易被 Virtual Machine/anti-fraud 模型识别，请确认内核已真实覆盖 WEBGL_debug_renderer_info，或改用 macOS/Apple GPU profile。"}
+	}
+	if platform == "mac" && !strings.Contains(combined, "apple") {
+		return []string{"指纹平台声明为 macOS，但 WebGL vendor/renderer 不是 Apple GPU；请改用 Apple GPU renderer 或保持平台/GPU 一致。"}
+	}
+	return nil
+}
+
 func launchFontRuntimeWarnings(args []string) []string {
 	values := parseLaunchArgValues(args)
 	platform := normalizeRuntimeWarningPlatform(values["--fingerprint-platform"])
@@ -51,8 +87,8 @@ func launchFontRuntimeWarnings(args []string) []string {
 		return nil
 	}
 
-	hostOS := goruntime.GOOS
-	if platform == "windows" && hostOS != "windows" && containsAnyFold(fonts, windowsFontRuntimeTells) {
+	hostPlatform := normalizeRuntimeWarningGOOS(hostGOOSForRuntimeWarning())
+	if platform == "windows" && hostPlatform != "windows" && containsAnyFold(fonts, windowsFontRuntimeTells) {
 		listing, ok := hostFontListingForRuntimeWarning()
 		if ok && containsAnyFold(listing, windowsFontRuntimeTells) {
 			return nil
@@ -63,7 +99,7 @@ func launchFontRuntimeWarnings(args []string) []string {
 		return []string{"当前宿主不是 Windows，但指纹声明为 Windows；无法完成字体运行时探测，请确认宿主/容器已安装 Windows marker fonts，避免字体枚举与平台身份冲突。"}
 	}
 
-	if platform == "mac" && hostOS != "darwin" && containsAnyFold(fonts, macFontRuntimeTells) {
+	if platform == "mac" && hostPlatform != "mac" && containsAnyFold(fonts, macFontRuntimeTells) {
 		return []string{"当前宿主不是 macOS，但指纹声明为 macOS；请确认字体、GPU、media codec 与 macOS 身份一致，否则建议改用宿主平台指纹。"}
 	}
 	return nil
@@ -85,6 +121,18 @@ var macFontRuntimeTells = []string{
 	"PingFang",
 	"Menlo",
 	"Helvetica Neue",
+}
+
+var virtualWebGLRuntimeTells = []string{
+	"SwiftShader",
+	"llvmpipe",
+	"VirtualBox",
+	"VMware",
+	"Parallels",
+	"QEMU",
+	"Hyper-V",
+	"virgl",
+	"Microsoft Basic Render",
 }
 
 func parseLaunchArgValues(args []string) map[string]string {
@@ -125,6 +173,36 @@ func normalizeRuntimeWarningPlatform(value string) string {
 		return "linux"
 	default:
 		return ""
+	}
+}
+
+func normalizeRuntimeWarningGOOS(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "windows":
+		return "windows"
+	case "darwin":
+		return "mac"
+	case "linux":
+		return "linux"
+	default:
+		return ""
+	}
+}
+
+func platformHostMismatchRuntimeWarning(hostPlatform string, declaredPlatform string) string {
+	return "当前宿主平台为 " + runtimeWarningPlatformLabel(hostPlatform) + "，但指纹声明为 " + runtimeWarningPlatformLabel(declaredPlatform) + "；跨平台 platform/GPU/字体/codec 组合容易推高 Fingerprint Virtual Machine 信号，请优先使用宿主平台 profile，或确认内核已完整覆盖相关运行时能力。"
+}
+
+func runtimeWarningPlatformLabel(platform string) string {
+	switch normalizeRuntimeWarningPlatform(platform) {
+	case "windows":
+		return "Windows"
+	case "mac":
+		return "macOS"
+	case "linux":
+		return "Linux"
+	default:
+		return strings.TrimSpace(platform)
 	}
 }
 
