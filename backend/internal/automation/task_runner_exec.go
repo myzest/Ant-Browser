@@ -44,9 +44,6 @@ func (m *Manager) RunScriptTask(ctx context.Context, req ScriptTaskRequest) (Scr
 		return ScriptTaskResult{}, fmt.Errorf("scriptPath is required")
 	}
 	req.LaunchBaseURL = strings.TrimSpace(req.LaunchBaseURL)
-	if req.LaunchBaseURL == "" {
-		return ScriptTaskResult{}, fmt.Errorf("launchBaseUrl is required")
-	}
 
 	payload := taskRunnerPayload{
 		TaskType:         taskTypeScript,

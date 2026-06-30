@@ -401,6 +401,11 @@ function buildLaunchRequestBody(defaultSelector, options) {
     }
   }
 
+  const stealthContext = normalizeStealthContextOptions(launchOptions);
+  if (stealthContext) {
+    body.stealthContext = stealthContext;
+  }
+
   const selector =
     launchOptions.selector &&
     typeof launchOptions.selector === 'object' &&
@@ -421,6 +426,46 @@ function normalizeLaunchSelectorPayload(selector) {
   }
   delete normalized.launchCode;
   return normalized;
+}
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object, key);
+}
+
+function normalizeStealthContextOptions(options) {
+  const launchOptions = options && typeof options === 'object' ? options : {};
+  const contextOptions =
+    launchOptions.contextOptions && typeof launchOptions.contextOptions === 'object' && !Array.isArray(launchOptions.contextOptions)
+      ? launchOptions.contextOptions
+      : {};
+  const stealthContext =
+    launchOptions.stealthContext && typeof launchOptions.stealthContext === 'object' && !Array.isArray(launchOptions.stealthContext)
+      ? { ...launchOptions.stealthContext }
+      : {};
+
+  if (!hasOwn(stealthContext, 'locale') && typeof contextOptions.locale === 'string') {
+    stealthContext.locale = contextOptions.locale;
+  }
+  if (!hasOwn(stealthContext, 'timezone') && typeof contextOptions.timezoneId === 'string') {
+    stealthContext.timezone = contextOptions.timezoneId;
+  }
+  if (!hasOwn(stealthContext, 'timezone') && typeof contextOptions.timezone === 'string') {
+    stealthContext.timezone = contextOptions.timezone;
+  }
+  if (!hasOwn(stealthContext, 'userAgent') && typeof contextOptions.userAgent === 'string') {
+    stealthContext.userAgent = contextOptions.userAgent;
+  }
+  if (!hasOwn(stealthContext, 'viewport') && contextOptions.viewport && typeof contextOptions.viewport === 'object') {
+    stealthContext.viewport = contextOptions.viewport;
+  }
+  if (!hasOwn(stealthContext, 'noViewport') && typeof contextOptions.noViewport === 'boolean') {
+    stealthContext.noViewport = contextOptions.noViewport;
+  }
+
+  if (Object.keys(stealthContext).length === 0) {
+    return null;
+  }
+  return stealthContext;
 }
 
 async function loadScriptModule(scriptPath) {
@@ -516,10 +561,14 @@ async function runScriptTask(payload, chromium) {
 
   const launch = async (options = {}) => {
     const body = buildLaunchRequestBody(selector, options);
+    const launchBaseUrl = String(payload.launchBaseUrl || '').trim().replace(/\/$/, '');
+    if (!launchBaseUrl) {
+      throw new Error('launchBaseUrl is required when script calls launch()');
+    }
 
     const response = await requestJSON(
       'POST',
-      `${String(payload.launchBaseUrl || '').replace(/\/$/, '')}/api/launch`,
+      `${launchBaseUrl}/api/launch`,
       body,
       launchHeaders
     );

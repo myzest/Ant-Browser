@@ -29,6 +29,7 @@ type browserStartPlan struct {
 	chromeBinaryPath      string
 	userDataDir           string
 	args                  []string
+	runtimeWarnings       []string
 	effectiveProxy        string
 	exitIPCacheKey        string
 	acquiredXrayBridgeKey string
@@ -171,12 +172,18 @@ func (a *App) prepareBrowserStartPlan(input browserStartInput, profile *BrowserP
 
 	launchArgs := buildBrowserLaunchArgs(profile, userDataDir, assignedDebugPort, effectiveProxy, sanitizedProfileLaunchArgs, temporaryProxyRegionArgs, sanitizedExtraLaunchArgs, input.StartURLs, a.browserDefaultStartURLs(), input.SkipDefaultStartURLs, browserRestoreLastSession(a.config))
 	launchArgs = a.resolveAutoWebRTCIPLaunchArgWithCacheKey(input.ProfileID, launchArgs, effectiveProxy, exitIPCacheKey)
+	cdmDir, widevineSeeded := seedWidevineHintIfAvailable(input.ProfileID, userDataDir, chromeBinaryPath)
+	runtimeWarnings := prefixRuntimeWarnings("[fingerprint]", collectLaunchRuntimeWarnings(input.ProfileID, launchArgs))
+	if warning := widevineRuntimeWarning(cdmDir, widevineSeeded); warning != "" {
+		runtimeWarnings = append(runtimeWarnings, "[widevine] "+warning)
+	}
 
 	return &browserStartPlan{
 		profile:               profile,
 		chromeBinaryPath:      chromeBinaryPath,
 		userDataDir:           userDataDir,
 		args:                  launchArgs,
+		runtimeWarnings:       runtimeWarnings,
 		effectiveProxy:        effectiveProxy,
 		exitIPCacheKey:        exitIPCacheKey,
 		acquiredXrayBridgeKey: acquiredXrayBridgeKey,

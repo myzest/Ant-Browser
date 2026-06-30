@@ -104,7 +104,7 @@ func (a *App) markProfileDebugReadyLocked(profile *BrowserProfile, debugPort int
 	}
 	profile.DebugPort = debugPort
 	profile.DebugReady = true
-	profile.RuntimeWarning = ""
+	profile.RuntimeWarning = clearDebugRuntimeWarning(profile.RuntimeWarning)
 	profile.LastError = ""
 }
 
@@ -120,7 +120,7 @@ func (a *App) setProfileDebugReady(profileId string, debugPort int) (*BrowserPro
 		return nil, false
 	}
 
-	changed := !profile.DebugReady || profile.RuntimeWarning != ""
+	changed := !profile.DebugReady || hasDebugRuntimeWarning(profile.RuntimeWarning)
 	if changed {
 		a.markProfileDebugReadyLocked(profile, debugPort)
 	}

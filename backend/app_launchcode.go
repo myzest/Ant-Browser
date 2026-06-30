@@ -4,6 +4,7 @@ import (
 	"ant-chrome/backend/internal/browser"
 	"ant-chrome/backend/internal/launchcode"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -14,8 +15,32 @@ func (a *App) StartInstance(profileId string) (*browser.Profile, error) {
 
 // StartInstanceWithParams 实现 launchcode.BrowserStarterWithParams 接口
 func (a *App) StartInstanceWithParams(profileId string, params launchcode.LaunchRequestParams) (*browser.Profile, error) {
+	params = normalizeStealthLaunchRequestParams(params)
 	preferVisibleWindow := shouldPreferVisibleWindowForStartWithParams(params.StartURLs)
 	return a.browserInstanceStartInternal(profileId, params.LaunchArgs, params.StartURLs, params.SkipDefaultStartURLs, preferVisibleWindow, false, true, params.ProxyId, params.ProxyConfig)
+}
+
+func normalizeStealthLaunchRequestParams(params launchcode.LaunchRequestParams) launchcode.LaunchRequestParams {
+	ctx := params.StealthContext
+	extra := make([]string, 0, len(params.LaunchArgs)+4)
+	extra = append(extra, params.LaunchArgs...)
+
+	if locale := strings.TrimSpace(ctx.Locale); locale != "" {
+		extra = append(extra, "--lang="+locale, "--fingerprint-locale="+locale)
+	}
+	timezone := strings.TrimSpace(ctx.Timezone)
+	if timezone == "" {
+		timezone = strings.TrimSpace(ctx.TimezoneID)
+	}
+	if timezone != "" {
+		extra = append(extra, "--timezone="+timezone, "--fingerprint-timezone="+timezone)
+	}
+	if ua := strings.TrimSpace(ctx.UserAgent); ua != "" {
+		extra = append(extra, "--user-agent="+ua)
+	}
+
+	params.LaunchArgs = extra
+	return params
 }
 
 // StatusInstance 实现 launchcode.BrowserStatusProvider 接口

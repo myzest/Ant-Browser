@@ -3,6 +3,7 @@ package backend
 import (
 	"ant-chrome/backend/internal/browser"
 	"ant-chrome/backend/internal/config"
+	"ant-chrome/backend/internal/launchcode"
 	"errors"
 	"fmt"
 	"net"
@@ -539,6 +540,39 @@ func TestWaitForBrowserDebugReadyMarksProfileReady(t *testing.T) {
 	}
 }
 
+func TestSetProfileDebugReadyPreservesFingerprintRuntimeWarning(t *testing.T) {
+	t.Parallel()
+
+	app := NewApp("")
+	app.browserMgr = browser.NewManager(config.DefaultConfig(), "")
+	app.browserMgr.Profiles = map[string]*BrowserProfile{
+		"profile-ready-warning": {
+			ProfileId:      "profile-ready-warning",
+			ProfileName:    "Ready Warning Browser",
+			Running:        true,
+			DebugPort:      9222,
+			DebugReady:     false,
+			RuntimeWarning: "[fingerprint] 字体风险\n[debug] 调试接口等待中",
+		},
+	}
+
+	snapshot, changed := app.setProfileDebugReady("profile-ready-warning", 9222)
+	if snapshot == nil || !changed {
+		t.Fatalf("expected debug ready state change, got snapshot=%+v changed=%v", snapshot, changed)
+	}
+	if !snapshot.DebugReady {
+		t.Fatalf("expected profile to be debug ready")
+	}
+	if snapshot.RuntimeWarning != "[fingerprint] 字体风险" {
+		t.Fatalf("expected fingerprint warning to be preserved and debug warning removed, got %q", snapshot.RuntimeWarning)
+	}
+
+	_, changed = app.setProfileDebugReady("profile-ready-warning", 9222)
+	if changed {
+		t.Fatalf("expected second debug ready call not to report change when only fingerprint warning remains")
+	}
+}
+
 func TestSanitizeManagedLaunchArgsRemovesSystemManagedFlags(t *testing.T) {
 	t.Parallel()
 
@@ -755,6 +789,158 @@ func TestResolveAutoWebRTCIPLaunchArgRemovesAutoOnResolutionFailure(t *testing.T
 	want := []string{"--fingerprint=111", "--lang=zh-CN"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("resolveAutoWebRTCIPLaunchArg failure mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
+func TestNormalizeStealthLaunchRequestParamsMapsLocaleTimezoneToArgs(t *testing.T) {
+	t.Parallel()
+
+	noViewport := true
+	params := normalizeStealthLaunchRequestParams(launchcode.LaunchRequestParams{
+		LaunchArgs: []string{"--disable-sync"},
+		StealthContext: launchcode.StealthContextOptions{
+			Locale:     "en-US",
+			TimezoneID: "America/New_York",
+			UserAgent:  "Mozilla/5.0 test",
+			Viewport:   map[string]int{"width": 1280, "height": 720},
+			NoViewport: &noViewport,
+		},
+	})
+
+	for _, want := range []string{
+		"--disable-sync",
+		"--lang=en-US",
+		"--fingerprint-locale=en-US",
+		"--timezone=America/New_York",
+		"--fingerprint-timezone=America/New_York",
+		"--user-agent=Mozilla/5.0 test",
+	} {
+		if !containsLaunchArg(params.LaunchArgs, want) {
+			t.Fatalf("expected stealth context arg %q, got=%v", want, params.LaunchArgs)
+		}
+	}
+	if containsLaunchArgPrefix(params.LaunchArgs, "--window-size") {
+		t.Fatalf("viewport must not be translated to --window-size/CDP emulation args: %v", params.LaunchArgs)
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsDetectsWindowsFontMismatch(t *testing.T) {
+	original := hostFontListingForRuntimeWarning
+	hostFontListingForRuntimeWarning = func() (string, bool) {
+		return "Noto Sans\nDejaVu Sans\n", true
+	}
+	defer func() { hostFontListingForRuntimeWarning = original }()
+
+	warnings := collectLaunchRuntimeWarnings("profile-fonts", []string{
+		"--fingerprint-platform=windows",
+		"--fingerprint-fonts=Arial,Calibri,Segoe UI,Times New Roman",
+	})
+
+	if len(warnings) == 0 {
+		t.Fatalf("expected Windows font runtime warning")
+	}
+	if !strings.Contains(warnings[0], "Windows 字体") {
+		t.Fatalf("unexpected font warning: %v", warnings)
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsSkipsWhenWindowsFontsPresent(t *testing.T) {
+	original := hostFontListingForRuntimeWarning
+	hostFontListingForRuntimeWarning = func() (string, bool) {
+		return "Segoe UI\nCalibri\n", true
+	}
+	defer func() { hostFontListingForRuntimeWarning = original }()
+
+	warnings := collectLaunchRuntimeWarnings("profile-fonts", []string{
+		"--fingerprint-platform=windows",
+		"--fingerprint-fonts=Arial,Calibri,Segoe UI,Times New Roman",
+	})
+
+	for _, warning := range warnings {
+		if strings.Contains(warning, "Windows 字体") {
+			t.Fatalf("did not expect font mismatch warning when fonts are present: %v", warnings)
+		}
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsDetectsUserAgentWithoutUAChRuntime(t *testing.T) {
+	t.Setenv("ANT_BROWSER_UACH_RUNTIME", "")
+
+	warnings := collectLaunchRuntimeWarnings("profile-ua", []string{
+		"--user-agent=Mozilla/5.0 test",
+	})
+
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "UA-CH") {
+		t.Fatalf("expected UA-CH warning, got=%v", warnings)
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsAllowsUAChRuntimeMarker(t *testing.T) {
+	t.Setenv("ANT_BROWSER_UACH_RUNTIME", "native")
+
+	warnings := collectLaunchRuntimeWarnings("profile-ua", []string{
+		"--user-agent=Mozilla/5.0 test",
+	})
+
+	for _, warning := range warnings {
+		if strings.Contains(warning, "未检测到 UA-CH runtime") {
+			t.Fatalf("did not expect missing UA-CH runtime warning with marker: %v", warnings)
+		}
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsDetectsBooleanFlags(t *testing.T) {
+	t.Parallel()
+
+	warnings := collectLaunchRuntimeWarnings("profile-boolean-flags", []string{
+		"--headless",
+		"--disable-gpu",
+	})
+
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "headless") {
+		t.Fatalf("expected headless warning for boolean flag, got=%v", warnings)
+	}
+	if !strings.Contains(joined, "禁用 GPU") {
+		t.Fatalf("expected disable-gpu warning for boolean flag, got=%v", warnings)
+	}
+}
+
+func TestSeedWidevineHintIfAvailableWritesHintOnLinux(t *testing.T) {
+	if goruntime.GOOS != "linux" {
+		t.Skip("Widevine hint seeding is Linux-only")
+	}
+
+	root := t.TempDir()
+	binDir := filepath.Join(root, "core")
+	cdmDir := filepath.Join(binDir, "WidevineCdm")
+	if err := os.MkdirAll(cdmDir, 0o755); err != nil {
+		t.Fatalf("create cdm dir failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(cdmDir, "manifest.json"), []byte(`{"version":"1.0.0.0"}`), 0o644); err != nil {
+		t.Fatalf("write manifest failed: %v", err)
+	}
+	chromePath := filepath.Join(binDir, "chrome")
+	if err := os.WriteFile(chromePath, []byte("stub"), 0o755); err != nil {
+		t.Fatalf("write chrome stub failed: %v", err)
+	}
+	userDataDir := filepath.Join(root, "profile")
+
+	resolved, ok := seedWidevineHintIfAvailable("profile-widevine", userDataDir, chromePath)
+	if !ok {
+		t.Fatalf("expected Widevine hint seeding to succeed")
+	}
+	if resolved == "" {
+		t.Fatalf("expected resolved cdm dir")
+	}
+	hintPath := filepath.Join(userDataDir, "WidevineCdm", widevineHintFileName)
+	data, err := os.ReadFile(hintPath)
+	if err != nil {
+		t.Fatalf("read hint failed: %v", err)
+	}
+	if !strings.Contains(string(data), resolved) {
+		t.Fatalf("hint does not reference cdm dir: %s", string(data))
 	}
 }
 

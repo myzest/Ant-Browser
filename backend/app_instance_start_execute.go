@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 )
 
@@ -55,7 +56,7 @@ func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browser
 			return profile, startErr
 		}
 
-		a.markProfileRunningLocked(input.ProfileID, profile, cmd, cmd.Process.Pid, 0, false, "")
+		a.markProfileRunningLocked(input.ProfileID, profile, cmd, cmd.Process.Pid, 0, false, joinRuntimeWarnings(plan.runtimeWarnings))
 		if plan.acquiredXrayBridgeKey != "" {
 			a.bindProfileXrayBridge(input.ProfileID, plan.acquiredXrayBridgeKey)
 			plan.releaseXrayBridge = false
@@ -78,7 +79,7 @@ func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browser
 	for attempt := 1; attempt <= plan.maxStartAttempts; attempt++ {
 		stableDebugPort, readyErr := waitBrowserDebugPortStable(plan.assignedDebugPort, plan.userDataDir, plan.startReadyTimeout, plan.startStableWindow, monitor)
 		if readyErr == nil {
-			a.markProfileRunningLocked(input.ProfileID, profile, cmd, cmd.Process.Pid, stableDebugPort, true, "")
+			a.markProfileRunningLocked(input.ProfileID, profile, cmd, cmd.Process.Pid, stableDebugPort, true, joinRuntimeWarnings(plan.runtimeWarnings))
 			if plan.acquiredXrayBridgeKey != "" {
 				a.bindProfileXrayBridge(input.ProfileID, plan.acquiredXrayBridgeKey)
 				plan.releaseXrayBridge = false
@@ -128,7 +129,7 @@ func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browser
 
 	pendingStartNotice := ""
 	if shouldKeepBrowserRunningPendingDebugReady(plan.assignedDebugPort, monitor) {
-		runtimeWarning := browserDebugPendingWarning(plan.totalReadyTimeout)
+		runtimeWarning := appendRuntimeWarning(joinRuntimeWarnings(plan.runtimeWarnings), "[debug] "+browserDebugPendingWarning(plan.totalReadyTimeout))
 		pendingStartNotice = browserDebugPendingStartNotice(plan.totalReadyTimeout)
 		a.markProfileRunningLocked(input.ProfileID, profile, cmd, cmd.Process.Pid, plan.assignedDebugPort, false, runtimeWarning)
 		if plan.acquiredXrayBridgeKey != "" {
@@ -161,6 +162,111 @@ func (a *App) startBrowserProfileWithPlan(input browserStartInput, plan *browser
 	startErr := fmt.Errorf("实例启动失败：浏览器在等待窗口内仍未就绪")
 	profile.LastError = startErr.Error()
 	return profile, startErr
+}
+
+func joinRuntimeWarnings(warnings []string) string {
+	cleaned := make([]string, 0, len(warnings))
+	seen := map[string]struct{}{}
+	for _, warning := range warnings {
+		warning = strings.TrimSpace(warning)
+		if warning == "" {
+			continue
+		}
+		if _, ok := seen[warning]; ok {
+			continue
+		}
+		seen[warning] = struct{}{}
+		cleaned = append(cleaned, warning)
+	}
+	return strings.Join(cleaned, "\n")
+}
+
+func appendRuntimeWarning(base string, extra string) string {
+	base = strings.TrimSpace(base)
+	extra = strings.TrimSpace(extra)
+	if base == "" {
+		return extra
+	}
+	if extra == "" || strings.Contains(base, extra) {
+		return base
+	}
+	return base + "\n" + extra
+}
+
+func prefixRuntimeWarnings(prefix string, warnings []string) []string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return warnings
+	}
+	out := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		warning = strings.TrimSpace(warning)
+		if warning == "" {
+			continue
+		}
+		if strings.HasPrefix(warning, prefix+" ") {
+			out = append(out, warning)
+		} else {
+			out = append(out, prefix+" "+warning)
+		}
+	}
+	return out
+}
+
+func removeRuntimeWarningPrefix(runtimeWarning string, prefix string) string {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return strings.TrimSpace(runtimeWarning)
+	}
+	lines := strings.Split(runtimeWarning, "\n")
+	kept := make([]string, 0, len(lines))
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, prefix+" ") {
+			continue
+		}
+		kept = append(kept, line)
+	}
+	return strings.Join(kept, "\n")
+}
+
+func hasRuntimeWarningPrefix(runtimeWarning string, prefix string) bool {
+	prefix = strings.TrimSpace(prefix)
+	if prefix == "" {
+		return strings.TrimSpace(runtimeWarning) != ""
+	}
+	for _, line := range strings.Split(runtimeWarning, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), prefix+" ") {
+			return true
+		}
+	}
+	return false
+}
+
+func hasStructuredRuntimeWarning(runtimeWarning string) bool {
+	for _, line := range strings.Split(runtimeWarning, "\n") {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "[") {
+			return true
+		}
+	}
+	return false
+}
+
+func clearDebugRuntimeWarning(runtimeWarning string) string {
+	runtimeWarning = strings.TrimSpace(runtimeWarning)
+	if runtimeWarning == "" {
+		return ""
+	}
+	if !hasStructuredRuntimeWarning(runtimeWarning) {
+		return ""
+	}
+	return removeRuntimeWarningPrefix(runtimeWarning, "[debug]")
+}
+
+func hasDebugRuntimeWarning(runtimeWarning string) bool {
+	runtimeWarning = strings.TrimSpace(runtimeWarning)
+	return runtimeWarning != "" && (!hasStructuredRuntimeWarning(runtimeWarning) || hasRuntimeWarningPrefix(runtimeWarning, "[debug]"))
 }
 
 func waitBrowserProcessStable(monitor *browserProcessMonitor, stableFor time.Duration) error {

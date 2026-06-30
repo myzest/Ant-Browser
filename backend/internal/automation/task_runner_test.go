@@ -171,6 +171,7 @@ func TestRunScriptTaskLaunchFiltersNonLaunchParams(t *testing.T) {
 		LaunchArgs           []string       `json:"launchArgs"`
 		StartURLs            []string       `json:"startUrls"`
 		SkipDefaultStartURLs bool           `json:"skipDefaultStartUrls"`
+		StealthContext       map[string]any `json:"stealthContext"`
 	}
 
 	receivedBody := launchRequestPayload{}
@@ -243,6 +244,101 @@ func TestRunScriptTaskLaunchFiltersNonLaunchParams(t *testing.T) {
 	}
 	if receivedBody.Keyword != "" {
 		t.Fatalf("expected non-launch params to be filtered, got keyword=%q", receivedBody.Keyword)
+	}
+}
+
+func TestRunScriptTaskLaunchMapsContextOptionsToStealthContext(t *testing.T) {
+	nodeExecPath := lookupNodeExecutable(t)
+
+	cfg := config.DefaultConfig()
+	cfg.Automation.Enabled = true
+	cfg.Automation.NodeSource = config.AutomationNodeSourceSystem
+	cfg.Automation.SystemNodePath = nodeExecPath
+	cfg.Automation.NodeVersion = "test-node"
+	cfg.Automation.PlaywrightCoreVersion = "1.59.0"
+	cfg.Automation.RuntimeVersion = "test-runtime"
+
+	manager := NewManager(t.TempDir(), cfg, nil, Options{})
+
+	state := manager.CurrentState()
+	if err := writeRunnerScript(state.RunnerPath); err != nil {
+		t.Fatalf("write runner script failed: %v", err)
+	}
+	if err := writeMockPlaywrightModule(state.RuntimeDir, cfg.Automation.PlaywrightCoreVersion); err != nil {
+		t.Fatalf("write mock playwright module failed: %v", err)
+	}
+
+	var receivedBody struct {
+		Selector       map[string]any `json:"selector"`
+		StealthContext struct {
+			Locale     string         `json:"locale"`
+			Timezone   string         `json:"timezone"`
+			UserAgent  string         `json:"userAgent"`
+			Viewport   map[string]int `json:"viewport"`
+			NoViewport bool           `json:"noViewport"`
+		} `json:"stealthContext"`
+	}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&receivedBody); err != nil {
+			t.Fatalf("decode launch request body failed: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":        true,
+			"profileId": "profile-script",
+			"debugPort": 9333,
+			"cdpUrl":    "http://127.0.0.1:9333",
+		})
+	}))
+	defer server.Close()
+
+	scriptDir := filepath.Join(state.RuntimeDir, "tmp", "scripts")
+	if err := os.MkdirAll(scriptDir, 0o755); err != nil {
+		t.Fatalf("create script dir failed: %v", err)
+	}
+	scriptPath := filepath.Join(scriptDir, "script-context-options.cjs")
+	scriptSource := `module.exports.run = async ({ launch }) => {
+  const session = await launch({
+    contextOptions: {
+      locale: 'en-US',
+      timezoneId: 'America/New_York',
+      userAgent: 'Mozilla/5.0 test',
+      viewport: { width: 1280, height: 720 },
+      noViewport: true,
+    },
+  })
+  return { ok: true, summary: 'ok', profileId: session.profileId }
+}`
+	if err := os.WriteFile(scriptPath, []byte(scriptSource), 0o644); err != nil {
+		t.Fatalf("write script failed: %v", err)
+	}
+
+	result, err := manager.RunScriptTask(context.Background(), ScriptTaskRequest{
+		TaskKey:       "script:context-options",
+		ScriptPath:    scriptPath,
+		Selector:      map[string]any{"code": "CTX_READY"},
+		LaunchBaseURL: server.URL,
+	})
+	if err != nil {
+		t.Fatalf("RunScriptTask returned error: %v", err)
+	}
+	if !result.OK {
+		t.Fatalf("expected script task to succeed, got %+v", result)
+	}
+	if receivedBody.StealthContext.Locale != "en-US" {
+		t.Fatalf("locale not mapped to stealthContext: %+v", receivedBody.StealthContext)
+	}
+	if receivedBody.StealthContext.Timezone != "America/New_York" {
+		t.Fatalf("timezoneId not mapped to stealthContext: %+v", receivedBody.StealthContext)
+	}
+	if receivedBody.StealthContext.UserAgent != "Mozilla/5.0 test" {
+		t.Fatalf("userAgent not mapped to stealthContext: %+v", receivedBody.StealthContext)
+	}
+	if receivedBody.StealthContext.Viewport["width"] != 1280 || receivedBody.StealthContext.Viewport["height"] != 720 {
+		t.Fatalf("viewport not mapped to stealthContext: %+v", receivedBody.StealthContext)
+	}
+	if !receivedBody.StealthContext.NoViewport {
+		t.Fatalf("noViewport not mapped to stealthContext: %+v", receivedBody.StealthContext)
 	}
 }
 

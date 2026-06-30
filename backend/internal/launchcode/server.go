@@ -27,11 +27,25 @@ type BrowserStatusProvider interface {
 
 // LaunchRequestParams 支持外部自动化透传的一次性启动参数
 type LaunchRequestParams struct {
-	LaunchArgs           []string `json:"launchArgs"`
-	StartURLs            []string `json:"startUrls"`
-	SkipDefaultStartURLs bool     `json:"skipDefaultStartUrls"`
-	ProxyId              string   `json:"proxyId"`
-	ProxyConfig          string   `json:"proxyConfig"`
+	LaunchArgs           []string              `json:"launchArgs"`
+	StartURLs            []string              `json:"startUrls"`
+	SkipDefaultStartURLs bool                  `json:"skipDefaultStartUrls"`
+	ProxyId              string                `json:"proxyId"`
+	ProxyConfig          string                `json:"proxyConfig"`
+	StealthContext       StealthContextOptions `json:"stealthContext,omitempty"`
+}
+
+// StealthContextOptions accepts Playwright-like context preferences at the
+// Launch API boundary without forcing callers to use detectable context
+// emulation. Locale/timezone are translated to native launch flags by App;
+// viewport is intentionally advisory/risk metadata only.
+type StealthContextOptions struct {
+	Locale     string         `json:"locale,omitempty"`
+	Timezone   string         `json:"timezone,omitempty"`
+	TimezoneID string         `json:"timezoneId,omitempty"`
+	UserAgent  string         `json:"userAgent,omitempty"`
+	Viewport   map[string]int `json:"viewport,omitempty"`
+	NoViewport *bool          `json:"noViewport,omitempty"`
 }
 
 // LaunchRequest POST /api/launch 的请求体
