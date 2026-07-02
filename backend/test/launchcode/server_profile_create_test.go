@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"slices"
 	"testing"
 	"time"
 
@@ -47,6 +48,15 @@ func newProfileCreateTestManager(t *testing.T, configure func(*config.Config)) *
 		configure(cfg)
 	}
 	return browser.NewManager(cfg, t.TempDir())
+}
+
+func hasArgPrefix(items []string, prefix string) bool {
+	for _, item := range items {
+		if len(item) >= len(prefix) && item[:len(prefix)] == prefix {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCreateProfileAPIStoresProxyAndMetadata(t *testing.T) {
@@ -125,6 +135,81 @@ func TestCreateProfileAPIStoresProxyAndMetadata(t *testing.T) {
 	}
 	if resolvedProfileID != resp.ProfileID {
 		t.Fatalf("launchCode 绑定的 profileId 错误: got=%s want=%s", resolvedProfileID, resp.ProfileID)
+	}
+}
+
+func TestCreateProfileAPIStoresFingerprintArgs(t *testing.T) {
+	svc := newInMemoryService()
+	mgr := newProfileCreateTestManager(t, nil)
+	starter := &managerBackedStarter{mgr: mgr}
+	handler := buildTestHandlerWithManager(svc, starter, mgr)
+
+	payload := bytes.NewBufferString(`{
+		"profile": {
+			"profileName": "buyer-us-001",
+			"fingerprintArgs": [
+				"--fingerprint-brand=Chrome",
+				"--fingerprint-platform=windows",
+				"--lang=en-US",
+				"--fingerprint-locale=en-US",
+				"--fingerprint-accept-language=en-US,en;q=0.9",
+				"--timezone=America/Los_Angeles",
+				"--fingerprint-timezone=America/Los_Angeles",
+				"--window-size=1920,1080",
+				"--fingerprint-screen-avail=1920,1040",
+				"--fingerprint-webgl-vendor=Intel",
+				"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+				"--fingerprint-webrtc-ip=auto"
+			],
+			"keywords": ["buyer-us-001"]
+		},
+		"launchCode": "BUYER_US_001"
+	}`)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/profiles", payload)
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+	handler.ServeHTTP(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("期望 201，实际 %d，body=%s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		OK      bool             `json:"ok"`
+		Profile *browser.Profile `json:"profile"`
+	}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("解析响应失败: %v", err)
+	}
+	if !resp.OK || resp.Profile == nil {
+		t.Fatalf("响应缺少 profile: %+v", resp)
+	}
+
+	for _, want := range []string{
+		"--fingerprint-brand=Chrome",
+		"--fingerprint-platform=windows",
+		"--fingerprint-locale=en-US",
+		"--fingerprint-accept-language=en-US,en;q=0.9",
+		"--fingerprint-timezone=America/Los_Angeles",
+		"--fingerprint-webgl-vendor=Intel",
+		"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+		"--fingerprint-webrtc-ip=auto",
+	} {
+		if !slices.Contains(resp.Profile.FingerprintArgs, want) {
+			t.Fatalf("响应 profile.fingerprintArgs 缺少 %q: %v", want, resp.Profile.FingerprintArgs)
+		}
+	}
+	if !hasArgPrefix(resp.Profile.FingerprintArgs, "--fingerprint=") {
+		t.Fatalf("后端应补齐稳定指纹种子: %v", resp.Profile.FingerprintArgs)
+	}
+
+	stored := mgr.Profiles[resp.Profile.ProfileId]
+	if stored == nil {
+		t.Fatalf("实例未持久化到 manager: %s", resp.Profile.ProfileId)
+	}
+	if !slices.Contains(stored.FingerprintArgs, "--fingerprint-locale=en-US") {
+		t.Fatalf("持久化 profile.fingerprintArgs 未保存入参: %v", stored.FingerprintArgs)
 	}
 }
 

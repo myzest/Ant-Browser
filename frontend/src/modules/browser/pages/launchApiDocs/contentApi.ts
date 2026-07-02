@@ -14,6 +14,8 @@ export const DOC_API_PROFILES_LAUNCH = `# 实例与启动
 
 ## 创建实例
 
+最小请求只需要传 \`profile\`。如果不传 \`profile.fingerprintArgs\`，后端会按实例 ID、平台默认值和绑定代理地区生成一套自洽指纹。
+
 \`\`\`bash
 curl -X POST http://127.0.0.1:19876/api/profiles \\
   -H "Content-Type: application/json" \\
@@ -27,6 +29,52 @@ curl -X POST http://127.0.0.1:19876/api/profiles \\
     "launchCode": "BUYER_001"
   }'
 \`\`\`
+
+## 创建实例（快速指纹配置）
+
+如果外部系统需要像界面“创建实例配置”一样一次性指定指纹，可以在 \`profile.fingerprintArgs\` 里直接传 CLI 参数数组。下面是一个可直接复制的 Windows / Chrome / 美国用户快速配置：
+
+\`\`\`bash
+curl -X POST http://127.0.0.1:19876/api/profiles \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "profile": {
+      "profileName": "buyer-us-001",
+      "proxyId": "proxy-us",
+      "fingerprintArgs": [
+        "--fingerprint-brand=Chrome",
+        "--fingerprint-platform=windows",
+        "--lang=en-US",
+        "--fingerprint-locale=en-US",
+        "--fingerprint-accept-language=en-US,en;q=0.9",
+        "--timezone=America/Los_Angeles",
+        "--fingerprint-timezone=America/Los_Angeles",
+        "--window-size=1920,1080",
+        "--fingerprint-screen-avail=1920,1040",
+        "--fingerprint-device-pixel-ratio=1",
+        "--fingerprint-color-depth=24",
+        "--fingerprint-hardware-concurrency=8",
+        "--fingerprint-device-memory=8",
+        "--fingerprint-canvas-noise=true",
+        "--fingerprint-audio-noise=true",
+        "--fingerprint-webgl-vendor=Intel",
+        "--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+        "--fingerprint-fonts=Segoe UI,Calibri,Cambria Math,Consolas,Arial,Tahoma,Times New Roman,Verdana",
+        "--webrtc-ip-handling-policy=disable_non_proxied_udp",
+        "--fingerprint-webrtc-ip=auto",
+        "--fingerprint-do-not-track=false",
+        "--fingerprint-touch-points=0",
+        "--fingerprint-media-devices=1,1,1"
+      ],
+      "launchArgs": ["--disable-sync", "--no-first-run"],
+      "keywords": ["buyer-us-001", "us"],
+      "tags": ["电商", "北美"]
+    },
+    "launchCode": "BUYER_US_001"
+  }'
+\`\`\`
+
+显式传入 \`fingerprintArgs\` 时，后端只保证补齐或修正 \`--fingerprint=<seed>\`，不会再自动补齐 WebGL、字体、屏幕、硬件等其它缺失项。为了降低异常风险，建议语言、时区、Accept-Language、屏幕、硬件、WebGL、字体和 WebRTC 成组配置；如果希望完全使用内置自洽默认指纹，就省略 \`fingerprintArgs\` 或传空数组。
 
 ## 创建并立即启动
 
@@ -129,6 +177,8 @@ curl -X POST http://127.0.0.1:19876/api/launch \\
 \`\`\`text
 launchCode 冲突 -> 409
 PUT 是整份更新
+创建实例 profile.fingerprintArgs 已接入；不传或传空数组时由后端生成默认自洽指纹
+PUT 更新也是整份 profile，若不想重算指纹，请先 GET 旧 profile 并带回原 fingerprintArgs
 运行中的实例不能直接 DELETE
 已运行实例不会因再次 launch / session 重新应用 fingerprint 或 profile 代理
 POST launch / session 中传入的一次性代理也不会作用于已运行进程
