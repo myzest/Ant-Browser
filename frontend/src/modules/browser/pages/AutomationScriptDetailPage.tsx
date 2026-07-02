@@ -12,6 +12,7 @@ import {
 import {
   Badge,
   Button,
+  ConfirmModal,
   FormItem,
   Input,
   Select,
@@ -614,6 +615,7 @@ export function AutomationScriptDetailPage() {
   const [dirty, setDirty] = useState(false);
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [showDualRuntimeRequests, setShowDualRuntimeRequests] = useState(false);
   const [busyAction, setBusyAction] = useState<
     "none" | "save" | "delete" | "refresh" | "export"
@@ -811,13 +813,11 @@ export function AutomationScriptDetailPage() {
     if (!draft) {
       return;
     }
-    if (!window.confirm(`确认删除脚本「${draft.name || "未命名脚本"}」吗？`)) {
-      return;
-    }
 
     setBusyAction("delete");
     try {
       await deleteAutomationScript(draft.id);
+      setDeleteConfirmOpen(false);
       toast.success("脚本已删除");
       navigate("/browser/automation", { replace: true });
     } catch (error: unknown) {
@@ -1091,7 +1091,7 @@ export function AutomationScriptDetailPage() {
           <Button
             size="sm"
             variant="danger"
-            onClick={() => void handleDelete()}
+            onClick={() => setDeleteConfirmOpen(true)}
             loading={busyAction === "delete"}
             disabled={busyAction !== "none" && busyAction !== "delete"}
           >
@@ -1441,6 +1441,15 @@ export function AutomationScriptDetailPage() {
         </DetailPanel>
       )}
 
+      <ConfirmModal
+        open={deleteConfirmOpen}
+        onClose={() => setDeleteConfirmOpen(false)}
+        onConfirm={handleDelete}
+        title="确认删除"
+        content={`确定要删除脚本「${draft.name || "未命名脚本"}」吗？此操作不可恢复。`}
+        confirmText="删除"
+        danger
+      />
       <AutomationScriptRunModal
         open={runModalOpen}
         script={draft}
