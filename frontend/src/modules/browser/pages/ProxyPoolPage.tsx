@@ -25,6 +25,7 @@ import {
   parseClashImportText,
   parseChainImportJSON,
   parseDirectImportText,
+  parseChainHopText,
   parseTimestampMs,
   nextProxyID,
   resolveImportSourceID,
@@ -100,6 +101,8 @@ export function ProxyPoolPage() {
   const [importGroupName, setImportGroupName] = useState('')
   const [chainImportText, setChainImportText] = useState('')
   const [directImportText, setDirectImportText] = useState('')
+  const [chainFirstHopText, setChainFirstHopText] = useState('')
+  const [chainSecondHopText, setChainSecondHopText] = useState('')
   const [chainImportForm, setChainImportForm] = useState<ChainImportForm>(() => createInitialChainImportForm())
   const [directImportForm, setDirectImportForm] = useState<DirectImportForm>(() => ({ ...INITIAL_DIRECT_IMPORT_FORM }))
   const [previewModalOpen, setPreviewModalOpen] = useState(false)
@@ -724,6 +727,27 @@ export function ProxyPoolPage() {
     }
   }
 
+  const handleClearImportForm = () => {
+    setImportUrl('')
+    setImportResolvedUrl('')
+    setImportText('')
+    setImportDnsServers('')
+    setImportNamePrefix('')
+    setImportGroupName('')
+    setChainImportText('')
+    setDirectImportText('')
+    setChainFirstHopText('')
+    setChainSecondHopText('')
+    setChainFrontClashUrl('')
+    setChainFrontClashNodes([])
+    setChainFrontClashSelectedIndex('')
+    setChainImportForm(createInitialChainImportForm())
+    setDirectImportForm({ ...INITIAL_DIRECT_IMPORT_FORM })
+    setPreviewList([])
+    setRemovedPreviewProxyNames([])
+    toast.success('导入表单已清空')
+  }
+
   const handleFillChainTemplate = () => {
     setChainImportText(CHAIN_QUICK_IMPORT_TEMPLATE)
   }
@@ -834,6 +858,9 @@ export function ProxyPoolPage() {
       const { form, groupName } = parseChainImportJSON(chainImportText)
       setChainImportForm(form)
       setImportGroupName(groupName)
+      setChainFrontClashUrl('')
+      setChainFrontClashNodes([])
+      setChainFrontClashSelectedIndex('')
       toast.success('JSON 已应用')
     } catch (error: any) {
       toast.error(error?.message || 'JSON 应用失败')
@@ -851,6 +878,38 @@ export function ProxyPoolPage() {
       toast.success('文本已应用')
     } catch (error: any) {
       toast.error(error?.message || '文本应用失败')
+    }
+  }
+
+  const handleApplyChainFirstHopText = () => {
+    try {
+      const hop = parseChainHopText(chainFirstHopText)
+      setChainImportForm(prev => ({
+        ...prev,
+        frontMode: 'manual',
+        first: hop,
+      }))
+      setChainFirstHopText('')
+      setChainFrontClashUrl('')
+      setChainFrontClashNodes([])
+      setChainFrontClashSelectedIndex('')
+      toast.success('前置代理文本已应用')
+    } catch (error: any) {
+      toast.error(error?.message || '前置代理文本应用失败')
+    }
+  }
+
+  const handleApplyChainSecondHopText = () => {
+    try {
+      const hop = parseChainHopText(chainSecondHopText)
+      setChainImportForm(prev => ({
+        ...prev,
+        second: hop,
+      }))
+      setChainSecondHopText('')
+      toast.success('后置代理文本已应用')
+    } catch (error: any) {
+      toast.error(error?.message || '后置代理文本应用失败')
     }
   }
 
@@ -977,6 +1036,8 @@ export function ProxyPoolPage() {
       setImportGroupName('')
       setChainImportText('')
       setDirectImportText('')
+      setChainFirstHopText('')
+      setChainSecondHopText('')
       setChainFrontClashUrl('')
       setChainFrontClashNodes([])
       setChainFrontClashSelectedIndex('')
@@ -1076,6 +1137,8 @@ export function ProxyPoolPage() {
         importGroupName={importGroupName}
         chainImportText={chainImportText}
         directImportText={directImportText}
+        chainFirstHopText={chainFirstHopText}
+        chainSecondHopText={chainSecondHopText}
         chainImportForm={chainImportForm}
         directImportForm={directImportForm}
         chainFrontClashUrl={chainFrontClashUrl}
@@ -1086,6 +1149,7 @@ export function ProxyPoolPage() {
         canParseImport={canParseImport}
         onClose={() => setImportModalOpen(false)}
         onParse={handleParseImport}
+        onClear={handleClearImportForm}
         onFetchImportUrl={handleFetchImportURL}
         onImportModeChange={handleImportModeChange}
         onImportUrlChange={handleImportUrlChange}
@@ -1099,6 +1163,10 @@ export function ProxyPoolPage() {
         onImportGroupNameChange={setImportGroupName}
         onChainImportTextChange={setChainImportText}
         onDirectImportTextChange={setDirectImportText}
+        onChainFirstHopTextChange={setChainFirstHopText}
+        onApplyChainFirstHopText={handleApplyChainFirstHopText}
+        onChainSecondHopTextChange={setChainSecondHopText}
+        onApplyChainSecondHopText={handleApplyChainSecondHopText}
         onApplyChainJSON={handleApplyChainJSON}
         onApplyDirectText={handleApplyDirectText}
         onChainImportFormChange={(patch) => {

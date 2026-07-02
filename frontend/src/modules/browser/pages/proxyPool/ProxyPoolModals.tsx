@@ -33,6 +33,8 @@ interface ProxyPoolImportModalProps {
   importGroupName: string
   chainImportText: string
   directImportText: string
+  chainFirstHopText: string
+  chainSecondHopText: string
   chainImportForm: ChainImportForm
   directImportForm: DirectImportForm
   chainFrontClashUrl: string
@@ -43,6 +45,7 @@ interface ProxyPoolImportModalProps {
   canParseImport: boolean
   onClose: () => void
   onParse: () => void
+  onClear: () => void
   onFetchImportUrl: () => void
   onImportModeChange: (nextMode: ProxyImportMode) => void
   onImportUrlChange: (nextValue: string) => void
@@ -56,6 +59,10 @@ interface ProxyPoolImportModalProps {
   onImportGroupNameChange: (nextValue: string) => void
   onChainImportTextChange: (nextValue: string) => void
   onDirectImportTextChange: (nextValue: string) => void
+  onChainFirstHopTextChange: (nextValue: string) => void
+  onApplyChainFirstHopText: () => void
+  onChainSecondHopTextChange: (nextValue: string) => void
+  onApplyChainSecondHopText: () => void
   onApplyChainJSON: () => void
   onApplyDirectText: () => void
   onChainImportFormChange: (patch: Partial<ChainImportForm>) => void
@@ -80,6 +87,8 @@ export function ProxyPoolImportModal({
   importGroupName,
   chainImportText,
   directImportText,
+  chainFirstHopText,
+  chainSecondHopText,
   chainImportForm,
   directImportForm,
   chainFrontClashUrl,
@@ -90,6 +99,7 @@ export function ProxyPoolImportModal({
   canParseImport,
   onClose,
   onParse,
+  onClear,
   onFetchImportUrl,
   onImportModeChange,
   onImportUrlChange,
@@ -103,6 +113,10 @@ export function ProxyPoolImportModal({
   onImportGroupNameChange,
   onChainImportTextChange,
   onDirectImportTextChange,
+  onChainFirstHopTextChange,
+  onApplyChainFirstHopText,
+  onChainSecondHopTextChange,
+  onApplyChainSecondHopText,
   onApplyChainJSON,
   onApplyDirectText,
   onChainImportFormChange,
@@ -122,10 +136,13 @@ export function ProxyPoolImportModal({
       width="600px"
       footer={
         <>
-          <Button variant="secondary" onClick={onClose} disabled={fetchingImportUrl}>
+          <Button variant="secondary" onClick={onClose} disabled={fetchingImportUrl || fetchingChainFrontClashUrl}>
             取消
           </Button>
-          <Button onClick={onParse} disabled={fetchingImportUrl || !canParseImport}>
+          <Button variant="secondary" onClick={onClear} disabled={fetchingImportUrl || fetchingChainFrontClashUrl}>
+            清空
+          </Button>
+          <Button onClick={onParse} disabled={fetchingImportUrl || fetchingChainFrontClashUrl || !canParseImport}>
             解析
           </Button>
         </>
@@ -143,7 +160,7 @@ export function ProxyPoolImportModal({
             variant={importMode === 'direct' ? undefined : 'secondary'}
             onClick={() => onImportModeChange('direct')}
           >
-            HTTP / SOCKS5
+            HTTP(S) / SOCKS5
           </Button>
           <Button
             variant={importMode === 'chain' ? undefined : 'secondary'}
@@ -156,7 +173,7 @@ export function ProxyPoolImportModal({
           {importMode === 'clash'
             ? '支持粘贴 Clash YAML，或通过订阅 URL 自动拉取并解析（含 proxies、dns、proxy-groups）'
             : importMode === 'direct'
-              ? '支持单条录入 HTTP / SOCKS5 代理，也支持 JSON 或多行标准代理文本批量导入，导入后直接生效，不走 Clash 桥接'
+              ? '支持单条录入 HTTP / HTTPS / SOCKS5 代理，也支持 JSON 或多行标准代理文本批量导入，导入后直接生效，不走 Clash 桥接'
               : '支持“前置 HTTP/SOCKS5 或 Clash 节点 + 第二层 HTTP/SOCKS5”的链式代理，导入后由本地桥接生成 127.0.0.1 SOCKS5 供 Chromium 使用'}
         </p>
         {importMode === 'clash' && (
@@ -247,7 +264,7 @@ export function ProxyPoolImportModal({
                 />
               </FormItem>
             </div>
-            <FormItem label="文本辅助（可选）" hint="支持单个 JSON、JSON 数组，或多行 http://:// / socks5://，每行一个">
+            <FormItem label="文本辅助（可选）" hint="支持单个 JSON、JSON 数组，或多行 http:// / https:// / socks5://，每行一个">
               <Textarea
                 value={directImportText}
                 onChange={(event) => onDirectImportTextChange(event.target.value)}
@@ -294,7 +311,7 @@ export function ProxyPoolImportModal({
             </div>
             <div className="rounded-md border border-[var(--color-border)] p-3 space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <h4 className="text-sm font-medium text-[var(--color-text-primary)]">前置代理</h4>
+                <h4 className="text-sm font-medium text-[var(--color-text-primary)] whitespace-nowrap flex-shrink-0">前置代理</h4>
                 <Select
                   value={chainImportForm.frontMode}
                   onChange={(event) => onChainImportFormChange({ frontMode: event.target.value as ChainImportForm['frontMode'] })}
@@ -305,6 +322,7 @@ export function ProxyPoolImportModal({
                 />
               </div>
               {chainImportForm.frontMode === 'manual' ? (
+                <>
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <FormItem label="协议">
                     <Select
@@ -347,6 +365,25 @@ export function ProxyPoolImportModal({
                     />
                   </FormItem>
                 </div>
+                <FormItem label="前置代理文本辅助（可选）" hint="输入 http:// 或 socks5:// 标准代理 URL，点击应用文本后回填前置代理表单">
+                  <div className="flex gap-2">
+                    <Input
+                      value={chainFirstHopText}
+                      onChange={(event) => onChainFirstHopTextChange(event.target.value)}
+                      placeholder="例如：http://user:pass@host:8080 或 socks5://host:1080"
+                      className="flex-1"
+                    />
+                    <Button
+                      size="sm"
+                      variant="secondary"
+                      onClick={onApplyChainFirstHopText}
+                      disabled={!chainFirstHopText.trim()}
+                    >
+                      应用文本
+                    </Button>
+                  </div>
+                </FormItem>
+                </>
               ) : (
                 <div className="space-y-3">
                   <FormItem label="前置 Clash 订阅 URL（可选）">
@@ -451,6 +488,24 @@ export function ProxyPoolImportModal({
                   />
                 </FormItem>
               </div>
+              <FormItem label="后置代理文本辅助（可选）" hint="输入 http:// 或 socks5:// 标准代理 URL，点击应用文本后回填第二层代理表单">
+                <div className="flex gap-2">
+                  <Input
+                    value={chainSecondHopText}
+                    onChange={(event) => onChainSecondHopTextChange(event.target.value)}
+                    placeholder="例如：http://user:pass@host:8080 或 socks5://host:1080"
+                    className="flex-1"
+                  />
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={onApplyChainSecondHopText}
+                    disabled={!chainSecondHopText.trim()}
+                  >
+                    应用文本
+                  </Button>
+                </div>
+              </FormItem>
             </div>
             <FormItem label="JSON 辅助（可选）">
               <Textarea
@@ -683,7 +738,7 @@ export function ProxyPoolEditModal({
             </FormItem>
             <div className="rounded-md border border-[var(--color-border)] p-3 space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <h4 className="text-sm font-medium text-[var(--color-text-primary)]">前置代理</h4>
+                <h4 className="text-sm font-medium text-[var(--color-text-primary)] whitespace-nowrap flex-shrink-0">前置代理</h4>
                 <Select
                   value={chainEditForm.frontMode}
                   onChange={(event) => onChainEditFormChange({ frontMode: event.target.value as ChainImportForm['frontMode'] })}

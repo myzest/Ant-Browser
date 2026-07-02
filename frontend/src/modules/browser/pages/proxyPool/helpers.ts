@@ -542,7 +542,7 @@ function normalizeDirectProtocol(raw: unknown): DirectImportForm['protocol'] {
   if (protocol === 'socks' || protocol === 'socket') {
     return 'socks5'
   }
-  throw new Error('protocol 仅支持 http / socks5')
+  throw new Error('protocol 仅支持 http / https / socks5')
 }
 
 function parseDirectProxyURL(raw: string): DirectImportForm {
@@ -551,7 +551,7 @@ function parseDirectProxyURL(raw: string): DirectImportForm {
     throw new Error('请输入标准代理地址')
   }
   if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(normalized)) {
-    throw new Error('单行文本需要包含协议头，需要包含协议头')
+    throw new Error('单行文本需要包含协议头')
   }
 
   let parsedURL: URL
@@ -688,7 +688,7 @@ function parseDirectImportObject(payload: Record<string, unknown>, fallbackGroup
 function parseDirectImportItems(raw: string): { items: ParsedDirectImportItem[]; defaultGroupName: string } {
   const text = raw.trim()
   if (!text) {
-    throw new Error('请输入 HTTP / SOCKS5 文本')
+    throw new Error('请输入 HTTP / HTTPS / SOCKS5 文本')
   }
 
   if (text.startsWith('{') || text.startsWith('[')) {
@@ -771,6 +771,43 @@ export function buildDirectImportCandidatesFromText(raw: string): { candidates: 
       groupName: item.groupName,
     })),
     defaultGroupName,
+  }
+}
+
+export function parseChainHopText(raw: string): ChainHopForm {
+  const text = raw.trim()
+  if (!text) {
+    throw new Error('请输入 HTTP / SOCKS5 代理文本')
+  }
+
+  let parsedURL: URL
+  try {
+    parsedURL = new URL(text)
+  } catch {
+    throw new Error('代理文本格式无效')
+  }
+
+  const protocol = parsedURL.protocol.replace(/:$/, '').toLowerCase()
+  if (protocol !== 'http' && protocol !== 'socks5') {
+    throw new Error('链式代理仅支持 http:// 或 socks5://')
+  }
+
+  const server = parsedURL.hostname.replace(/^\[(.*)\]$/, '$1').trim()
+  if (!server) {
+    throw new Error('代理文本缺少主机名')
+  }
+
+  const port = Number(parsedURL.port)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error('代理文本缺少有效端口')
+  }
+
+  return {
+    protocol: protocol as ChainHopForm['protocol'],
+    server,
+    port: String(port),
+    username: parsedURL.username ? decodeURIComponent(parsedURL.username) : '',
+    password: parsedURL.password ? decodeURIComponent(parsedURL.password) : '',
   }
 }
 
