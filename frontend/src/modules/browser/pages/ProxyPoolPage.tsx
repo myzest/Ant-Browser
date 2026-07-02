@@ -1,4 +1,4 @@
-﻿import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, ConfirmModal, FormItem, Input, Modal, Textarea, toast } from '../../../shared/components'
 import type { SortOrder } from '../../../shared/components/Table'
 import type { BrowserProxy, ProxyCheckSettings, ProxyIPHealthResult } from '../types'
@@ -6,6 +6,7 @@ import { createDefaultProxyCheckSettings, fetchBrowserProxies, fetchBrowserProxy
 import { EventsOn } from '../../../wailsjs/runtime/runtime'
 import {
   BUILTIN_PROXY_IDS,
+  CHAIN_CLASH_QUICK_IMPORT_TEMPLATE,
   CHAIN_QUICK_IMPORT_TEMPLATE,
   DIRECT_QUICK_IMPORT_TEMPLATE,
   INITIAL_CHAIN_IMPORT_FORM,
@@ -16,6 +17,7 @@ import {
   buildImportCandidatesFromClash,
   buildImportPreview,
   buildRefreshedSourceProxies,
+  clashProxyToYaml,
   collectURLImportSources,
   createExistingProxyIDPicker,
   ensureBuiltinProxies,
@@ -29,6 +31,7 @@ import {
   toChainImportForm,
   toDisplayList,
   type ChainImportForm,
+  type ClashProxy,
   type DirectImportForm,
   type ProxyDisplayInfo,
   type ProxyImportMode,
@@ -104,6 +107,10 @@ export function ProxyPoolPage() {
   const [removedPreviewProxyNames, setRemovedPreviewProxyNames] = useState<string[]>([])
   const [importing, setImporting] = useState(false)
   const [fetchingImportUrl, setFetchingImportUrl] = useState(false)
+  const [chainFrontClashUrl, setChainFrontClashUrl] = useState('')
+  const [chainFrontClashNodes, setChainFrontClashNodes] = useState<ClashProxy[]>([])
+  const [chainFrontClashSelectedIndex, setChainFrontClashSelectedIndex] = useState('')
+  const [fetchingChainFrontClashUrl, setFetchingChainFrontClashUrl] = useState(false)
   const [refreshingAllSources, setRefreshingAllSources] = useState(false)
   const [refreshingSourceIds, setRefreshingSourceIds] = useState<Set<string>>(new Set())
   const [globalAutoRefreshEnabled, setGlobalAutoRefreshEnabled] = useState(false)
@@ -710,10 +717,88 @@ export function ProxyPoolPage() {
       setImportUrl('')
       setImportDnsServers('')
     }
+    if (nextMode !== 'chain') {
+      setChainFrontClashUrl('')
+      setChainFrontClashNodes([])
+      setChainFrontClashSelectedIndex('')
+    }
   }
 
   const handleFillChainTemplate = () => {
     setChainImportText(CHAIN_QUICK_IMPORT_TEMPLATE)
+  }
+
+  const handleFillChainClashTemplate = () => {
+    setChainImportText(CHAIN_CLASH_QUICK_IMPORT_TEMPLATE)
+  }
+
+  const handleFetchChainFrontClashURL = async () => {
+    const targetURL = chainFrontClashUrl.trim()
+    if (!targetURL) {
+      toast.error('请输入前置 Clash 订阅 URL')
+      return
+    }
+
+    setFetchingChainFrontClashUrl(true)
+    try {
+      const result = await fetchClashImportFromURL(targetURL)
+      const parsed = parseClashImportText(result.content || '')
+      if (!parsed.length) {
+        throw new Error('订阅内容未解析到可用代理')
+      }
+      setChainFrontClashNodes(parsed)
+      setChainFrontClashSelectedIndex('0')
+      const first = parsed[0]
+      setChainImportForm(prev => ({
+        ...prev,
+        frontMode: 'clash',
+        frontClashText: clashProxyToYaml(first),
+        frontClashName: first.name || '',
+      }))
+      toast.success(`前置订阅获取成功，检测到 ${parsed.length} 个节点`)
+    } catch (error: any) {
+      setChainFrontClashNodes([])
+      setChainFrontClashSelectedIndex('')
+      toast.error(error?.message || '前置订阅获取失败')
+    } finally {
+      setFetchingChainFrontClashUrl(false)
+    }
+  }
+
+  const handleParseChainFrontClashText = () => {
+    try {
+      const parsed = parseClashImportText(chainImportForm.frontClashText || '')
+      if (!parsed.length) {
+        throw new Error('输入内容未解析到可用代理')
+      }
+      setChainFrontClashNodes(parsed)
+      setChainFrontClashSelectedIndex('0')
+      const first = parsed[0]
+      setChainImportForm(prev => ({
+        ...prev,
+        frontMode: 'clash',
+        frontClashText: clashProxyToYaml(first),
+        frontClashName: first.name || '',
+      }))
+      toast.success(`已解析 ${parsed.length} 个前置节点，请选择要使用的节点`)
+    } catch (error: any) {
+      setChainFrontClashNodes([])
+      setChainFrontClashSelectedIndex('')
+      toast.error(error?.message || '前置节点输入解析失败')
+    }
+  }
+
+  const handleSelectChainFrontClashNode = (nextIndex: string) => {
+    setChainFrontClashSelectedIndex(nextIndex)
+    const index = Number(nextIndex)
+    const node = chainFrontClashNodes[index]
+    if (!node) return
+    setChainImportForm(prev => ({
+      ...prev,
+      frontMode: 'clash',
+      frontClashText: clashProxyToYaml(node),
+      frontClashName: node.name || '',
+    }))
   }
 
   const handleFillDirectTemplate = () => {
@@ -892,6 +977,9 @@ export function ProxyPoolPage() {
       setImportGroupName('')
       setChainImportText('')
       setDirectImportText('')
+      setChainFrontClashUrl('')
+      setChainFrontClashNodes([])
+      setChainFrontClashSelectedIndex('')
       setChainImportForm(createInitialChainImportForm())
       setDirectImportForm({ ...INITIAL_DIRECT_IMPORT_FORM })
       setPreviewList([])
@@ -909,10 +997,11 @@ export function ProxyPoolPage() {
     ? !!importText.trim()
     : importMode === 'direct'
       ? !!directImportText.trim() || (!!directImportForm.server.trim() && !!directImportForm.port.trim())
-      : !!chainImportForm.first.server.trim()
-        && !!chainImportForm.first.port.trim()
-        && !!chainImportForm.second.server.trim()
+      : !!chainImportForm.second.server.trim()
         && !!chainImportForm.second.port.trim()
+        && (chainImportForm.frontMode === 'clash'
+          ? !!chainImportForm.frontClashText.trim()
+          : !!chainImportForm.first.server.trim() && !!chainImportForm.first.port.trim())
 
   return (
     <div className="space-y-5 animate-fade-in">
@@ -989,7 +1078,11 @@ export function ProxyPoolPage() {
         directImportText={directImportText}
         chainImportForm={chainImportForm}
         directImportForm={directImportForm}
+        chainFrontClashUrl={chainFrontClashUrl}
+        chainFrontClashNodes={chainFrontClashNodes}
+        chainFrontClashSelectedIndex={chainFrontClashSelectedIndex}
         fetchingImportUrl={fetchingImportUrl}
+        fetchingChainFrontClashUrl={fetchingChainFrontClashUrl}
         canParseImport={canParseImport}
         onClose={() => setImportModalOpen(false)}
         onParse={handleParseImport}
@@ -997,6 +1090,10 @@ export function ProxyPoolPage() {
         onImportModeChange={handleImportModeChange}
         onImportUrlChange={handleImportUrlChange}
         onImportTextChange={setImportText}
+        onChainFrontClashUrlChange={setChainFrontClashUrl}
+        onFetchChainFrontClashUrl={handleFetchChainFrontClashURL}
+        onParseChainFrontClashText={handleParseChainFrontClashText}
+        onSelectChainFrontClashNode={handleSelectChainFrontClashNode}
         onImportDnsServersChange={setImportDnsServers}
         onImportNamePrefixChange={setImportNamePrefix}
         onImportGroupNameChange={setImportGroupName}
@@ -1004,9 +1101,16 @@ export function ProxyPoolPage() {
         onDirectImportTextChange={setDirectImportText}
         onApplyChainJSON={handleApplyChainJSON}
         onApplyDirectText={handleApplyDirectText}
-        onChainImportFormChange={(patch) => setChainImportForm((prev) => ({ ...prev, ...patch }))}
+        onChainImportFormChange={(patch) => {
+          if (Object.prototype.hasOwnProperty.call(patch, 'frontClashText')) {
+            setChainFrontClashNodes([])
+            setChainFrontClashSelectedIndex('')
+          }
+          setChainImportForm((prev) => ({ ...prev, ...patch }))
+        }}
         onChainImportHopChange={updateChainImportHop}
         onFillChainTemplate={handleFillChainTemplate}
+        onFillChainClashTemplate={handleFillChainClashTemplate}
         onCopyChainTemplate={() => void handleCopyChainTemplate()}
         onFillDirectTemplate={handleFillDirectTemplate}
         onCopyDirectTemplate={() => void handleCopyDirectTemplate()}

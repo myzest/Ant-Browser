@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"encoding/json"
+	"net/url"
 	"os"
 	"testing"
 
@@ -25,7 +26,7 @@ func TestChainSocks5RuntimeConfigRoutesThroughSecondHop(t *testing.T) {
 	cfgPath, err := manager.buildRuntimeConfigWithRoute(
 		"chain-test",
 		[]interface{}{
-			chainSocks5Outbound(chainCfg.First, "first-hop", ""),
+			chainSocks5Outbound(chainCfg.FirstHop, "first-hop", ""),
 			chainSocks5Outbound(chainCfg.Second, "second-hop", "first-hop"),
 		},
 		[]interface{}{
@@ -195,7 +196,7 @@ func TestChainMixedHTTPAndSocksRuntimeConfig(t *testing.T) {
 		t.Fatalf("ParseChainSocks5Config returned error: %v", err)
 	}
 
-	first := chainSocks5Outbound(chainCfg.First, "first-hop", "")
+	first := chainSocks5Outbound(chainCfg.FirstHop, "first-hop", "")
 	second := chainSocks5Outbound(chainCfg.Second, "second-hop", "first-hop")
 	if first["protocol"] != "http" {
 		t.Fatalf("first protocol = %v, want http", first["protocol"])
@@ -206,5 +207,49 @@ func TestChainMixedHTTPAndSocksRuntimeConfig(t *testing.T) {
 	proxySettings, ok := second["proxySettings"].(map[string]interface{})
 	if !ok || proxySettings["tag"] != "first-hop" {
 		t.Fatalf("second proxySettings invalid: %+v", second["proxySettings"])
+	}
+}
+
+func TestChainClashFirstHopRuntimeConfig(t *testing.T) {
+	raw := `{"first":{"type":"clash","name":"front-vmess","node":{"name":"front-vmess","type":"vmess","server":"front.example.com","port":443,"uuid":"11111111-1111-1111-1111-111111111111","cipher":"auto","tls":true}},"second":{"protocol":"http","server":"second.example.com","port":8080}}`
+	chainConfig := "chain+socks5://" + url.QueryEscape(raw)
+	chainCfg, err := ParseChainSocks5Config(chainConfig)
+	if err != nil {
+		t.Fatalf("ParseChainSocks5Config returned error: %v", err)
+	}
+	if chainCfg.FirstClashHop == nil {
+		t.Fatal("expected first clash hop")
+	}
+
+	first, err := chainFirstOutbound(chainCfg)
+	if err != nil {
+		t.Fatalf("chainFirstOutbound returned error: %v", err)
+	}
+	if first["tag"] != "first-hop" {
+		t.Fatalf("first tag = %v, want first-hop", first["tag"])
+	}
+	if first["protocol"] != "vmess" {
+		t.Fatalf("first protocol = %v, want vmess", first["protocol"])
+	}
+
+	second := chainSocks5Outbound(chainCfg.Second, "second-hop", "first-hop")
+	proxySettings, ok := second["proxySettings"].(map[string]interface{})
+	if !ok || proxySettings["tag"] != "first-hop" {
+		t.Fatalf("second proxySettings invalid: %+v", second["proxySettings"])
+	}
+}
+
+func TestChainClashFirstHopSupportsStandardHTTPNode(t *testing.T) {
+	raw := `{"first":{"type":"clash","node":{"name":"front-http","type":"http","server":"front.example.com","port":8080,"username":"u","password":"p"}},"second":{"protocol":"socks5","server":"second.example.com","port":1080}}`
+	chainCfg, err := ParseChainSocks5Config("chain+socks5://" + url.QueryEscape(raw))
+	if err != nil {
+		t.Fatalf("ParseChainSocks5Config returned error: %v", err)
+	}
+	first, err := chainFirstOutbound(chainCfg)
+	if err != nil {
+		t.Fatalf("chainFirstOutbound returned error: %v", err)
+	}
+	if first["tag"] != "first-hop" || first["protocol"] != "http" {
+		t.Fatalf("unexpected first outbound: %+v", first)
 	}
 }

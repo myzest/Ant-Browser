@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"gopkg.in/yaml.v3"
 )
 
 func (m *XrayManager) ensureBridge(proxyConfig string, proxies []config.BrowserProxy, proxyId string, pin bool) (string, string, error) {
@@ -40,8 +42,14 @@ func (m *XrayManager) ensureBridge(proxyConfig string, proxies []config.BrowserP
 			log.Error("链式节点解析失败", logger.F("error", err))
 			return "", "", err
 		}
+
+		firstOutbound, err := chainFirstOutbound(chainCfg)
+		if err != nil {
+			log.Error("链式第一层节点解析失败", logger.F("error", err))
+			return "", "", err
+		}
 		outbounds = []interface{}{
-			chainSocks5Outbound(chainCfg.First, "first-hop", ""),
+			firstOutbound,
 			chainSocks5Outbound(chainCfg.Second, "second-hop", "first-hop"),
 		}
 		routes = []interface{}{
@@ -182,6 +190,59 @@ func (m *XrayManager) launchBridgeAttempt(log *logger.Logger, key string, binary
 	}
 
 	return fmt.Sprintf("socks5://127.0.0.1:%d", port), bridge, nil
+}
+
+func chainFirstOutbound(cfg *chainSocks5Config) (map[string]interface{}, error) {
+	if cfg == nil {
+		return nil, fmt.Errorf("链式代理配置为空")
+	}
+	if cfg.FirstClashHop != nil {
+		outbound, standard, err := buildChainClashOutbound(cfg.FirstClashHop.Node, "first-hop")
+		if err != nil {
+			return nil, err
+		}
+		if standard != "" {
+			return buildStandardChainOutbound(standard, "first-hop", "")
+		}
+		return outbound, nil
+	}
+	return chainSocks5Outbound(cfg.FirstHop, "first-hop", ""), nil
+}
+
+func buildChainClashOutbound(node map[string]interface{}, tag string) (map[string]interface{}, string, error) {
+	data, err := yaml.Marshal(node)
+	if err != nil {
+		return nil, "", fmt.Errorf("Clash 节点序列化失败: %w", err)
+	}
+	outbound, standard, err := parseClashNode(string(data))
+	if err != nil {
+		return nil, "", err
+	}
+	if standard != "" {
+		return nil, standard, nil
+	}
+	if outbound == nil {
+		return nil, "", fmt.Errorf("Clash 节点解析失败")
+	}
+	outbound["tag"] = tag
+	return outbound, "", nil
+}
+
+func buildStandardChainOutbound(standard string, tag string, nextTag string) (map[string]interface{}, error) {
+	spec, err := parseStandardProxySpec(standard)
+	if err != nil {
+		return nil, err
+	}
+	if spec == nil {
+		return nil, fmt.Errorf("标准代理解析失败")
+	}
+	return chainSocks5Outbound(chainSocks5Hop{
+		Protocol: spec.Scheme,
+		Server:   spec.Server,
+		Port:     spec.Port,
+		Username: spec.Username,
+		Password: spec.Password,
+	}, tag, nextTag), nil
 }
 
 func chainSocks5Outbound(hop chainSocks5Hop, tag string, nextTag string) map[string]interface{} {

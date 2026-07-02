@@ -1,4 +1,4 @@
-﻿import yaml from 'js-yaml'
+import yaml from 'js-yaml'
 
 import type { BrowserProxy } from '../../types'
 
@@ -35,11 +35,22 @@ export interface ChainHopForm {
   password: string
 }
 
+export type ChainFrontMode = 'manual' | 'clash'
+
 export interface ChainImportForm {
   proxyName: string
   localPort: string
+  frontMode: ChainFrontMode
   first: ChainHopForm
+  frontClashText: string
+  frontClashName: string
   second: ChainHopForm
+}
+
+interface ChainClashHopConfig {
+  type: 'clash'
+  name?: string
+  node: ClashProxy
 }
 
 interface ChainSocks5HopConfig {
@@ -50,9 +61,11 @@ interface ChainSocks5HopConfig {
   password?: string
 }
 
+type ChainFirstHopConfig = ChainSocks5HopConfig | ChainClashHopConfig
+
 interface ChainSocks5Config {
   localPort?: number
-  first: ChainSocks5HopConfig
+  first: ChainFirstHopConfig
   second: ChainSocks5HopConfig
 }
 
@@ -68,6 +81,29 @@ export const CHAIN_QUICK_IMPORT_TEMPLATE = `{
     "port": "",
     "username": "",
     "password": ""
+  },
+  "second": {
+    "protocol": "http",
+    "server": "",
+    "port": "",
+    "username": "",
+    "password": ""
+  }
+}`
+
+export const CHAIN_CLASH_QUICK_IMPORT_TEMPLATE = `{
+  "name": "",
+  "group": "",
+  "localPort": "",
+  "first": {
+    "type": "clash",
+    "name": "前置 Clash 节点名称（可选）",
+    "node": {
+      "name": "Clash 节点名称",
+      "type": "vmess",
+      "server": "example.com",
+      "port": 443
+    }
   },
   "second": {
     "protocol": "http",
@@ -106,6 +142,7 @@ export const INITIAL_DIRECT_IMPORT_FORM: DirectImportForm = {
 export const INITIAL_CHAIN_IMPORT_FORM: ChainImportForm = {
   proxyName: '',
   localPort: '',
+  frontMode: 'manual',
   first: {
     protocol: 'http',
     server: '',
@@ -113,6 +150,8 @@ export const INITIAL_CHAIN_IMPORT_FORM: ChainImportForm = {
     username: '',
     password: '',
   },
+  frontClashText: '',
+  frontClashName: '',
   second: {
     protocol: 'http',
     server: '',
@@ -120,6 +159,56 @@ export const INITIAL_CHAIN_IMPORT_FORM: ChainImportForm = {
     username: '',
     password: '',
   },
+}
+
+function isChainClashHopConfig(hop: ChainFirstHopConfig): hop is ChainClashHopConfig {
+  return (hop as ChainClashHopConfig).type === 'clash'
+}
+
+function normalizeChainManualHop(raw: unknown): ChainSocks5HopConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const hop = raw as Record<string, unknown>
+  const protocol = String(hop.protocol || '').trim().toLowerCase()
+  if (protocol && protocol !== 'socks5' && protocol !== 'http') return null
+
+  const server = String(hop.server || '').trim()
+  if (!server) return null
+
+  const portVal = Number(hop.port || 0)
+  if (!Number.isInteger(portVal) || portVal < 1 || portVal > 65535) return null
+
+  const username = String(hop.username || '').trim()
+  const password = hop.password === undefined || hop.password === null ? '' : String(hop.password)
+  if (password && !username) return null
+
+  return {
+    protocol: protocol === 'http' ? 'http' : 'socks5',
+    server,
+    port: portVal,
+    username: username || undefined,
+    password: password || undefined,
+  }
+}
+
+function normalizeChainClashHop(raw: unknown): ChainClashHopConfig | null {
+  if (!raw || typeof raw !== 'object') return null
+  const hop = raw as Record<string, unknown>
+  const type = String(hop.type || hop.protocol || '').trim().toLowerCase()
+  if (type !== 'clash') return null
+
+  const nodeSource = hop.node ?? hop.proxy ?? hop.clash
+  const node = normalizeSingleClashProxy(nodeSource)
+  if (!node) return null
+
+  return {
+    type: 'clash',
+    name: String(hop.name ?? node.name ?? '').trim() || undefined,
+    node,
+  }
+}
+
+function normalizeChainFirstHop(raw: unknown): ChainFirstHopConfig | null {
+  return normalizeChainClashHop(raw) || normalizeChainManualHop(raw)
 }
 
 function parseChainSocks5Config(proxyConfig: string): ChainSocks5Config | null {
@@ -133,36 +222,11 @@ function parseChainSocks5Config(proxyConfig: string): ChainSocks5Config | null {
     return null
   }
 
-  const normalizeHop = (raw: unknown): ChainSocks5HopConfig | null => {
-    if (!raw || typeof raw !== 'object') return null
-    const hop = raw as Record<string, unknown>
-    const protocol = String(hop.protocol || '').trim().toLowerCase()
-    if (protocol && protocol !== 'socks5' && protocol !== 'http') return null
-
-    const server = String(hop.server || '').trim()
-    if (!server) return null
-
-    const portVal = Number(hop.port || 0)
-    if (!Number.isInteger(portVal) || portVal < 1 || portVal > 65535) return null
-
-    const username = String(hop.username || '').trim()
-    const password = hop.password === undefined || hop.password === null ? '' : String(hop.password)
-    if (password && !username) return null
-
-    return {
-      protocol: protocol === 'http' ? 'http' : 'socks5',
-      server,
-      port: portVal,
-      username: username || undefined,
-      password: password || undefined,
-    }
-  }
-
   try {
     const decoded = decodeURIComponent(encoded)
     const parsed = JSON.parse(decoded) as Record<string, unknown>
-    const first = normalizeHop(parsed.first)
-    const second = normalizeHop(parsed.second)
+    const first = normalizeChainFirstHop(parsed.first)
+    const second = normalizeChainManualHop(parsed.second)
     if (!first || !second) return null
 
     const localPortRaw = parsed.localPort
@@ -187,16 +251,38 @@ export function toChainImportForm(proxyName: string, proxyConfig: string): Chain
     return null
   }
 
+  if (isChainClashHopConfig(cfg.first)) {
+    return {
+      proxyName,
+      localPort: cfg.localPort ? String(cfg.localPort) : '',
+      frontMode: 'clash',
+      first: { ...INITIAL_CHAIN_IMPORT_FORM.first },
+      frontClashText: proxyToYaml(cfg.first.node),
+      frontClashName: cfg.first.name || cfg.first.node.name || '',
+      second: {
+        protocol: cfg.second.protocol,
+        server: cfg.second.server,
+        port: String(cfg.second.port),
+        username: cfg.second.username || '',
+        password: cfg.second.password || '',
+      },
+    }
+  }
+
+  const manualFirst = cfg.first
   return {
     proxyName,
     localPort: cfg.localPort ? String(cfg.localPort) : '',
+    frontMode: 'manual',
     first: {
-      protocol: cfg.first.protocol,
-      server: cfg.first.server,
-      port: String(cfg.first.port),
-      username: cfg.first.username || '',
-      password: cfg.first.password || '',
+      protocol: manualFirst.protocol,
+      server: manualFirst.server,
+      port: String(manualFirst.port),
+      username: manualFirst.username || '',
+      password: manualFirst.password || '',
     },
+    frontClashText: '',
+    frontClashName: '',
     second: {
       protocol: cfg.second.protocol,
       server: cfg.second.server,
@@ -301,16 +387,32 @@ function proxyToYaml(proxy: ClashProxy): string {
   return yaml.dump([proxy], { flowLevel: -1, lineWidth: -1 }).trim()
 }
 
+export function clashProxyToYaml(proxy: ClashProxy): string {
+  return proxyToYaml(proxy)
+}
+
 function quoteYamlScalar(value: string): string {
   const trimmed = value.trim()
   if (!trimmed) return "''"
   return `'${trimmed.replace(/'/g, "''")}'`
 }
 
+function normalizeSingleClashProxy(input: unknown): ClashProxy | null {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return null
+  const record = input as Record<string, unknown>
+  const type = String(record.type || '').trim()
+  const server = String(record.server || '').trim()
+  const port = Number(record.port || 0)
+  if (!type || !server || !Number.isInteger(port) || port < 1 || port > 65535) {
+    return null
+  }
+  return record as unknown as ClashProxy
+}
+
 function normalizeImportedProxyArray(payload: unknown): ClashProxy[] | null {
   const asArray = (input: unknown): ClashProxy[] => {
     if (!Array.isArray(input)) return []
-    return input.filter((item): item is ClashProxy => !!item && typeof item === 'object')
+    return input.filter((item): item is ClashProxy => !!normalizeSingleClashProxy(item))
   }
 
   if (Array.isArray(payload)) {
@@ -321,6 +423,10 @@ function normalizeImportedProxyArray(payload: unknown): ClashProxy[] | null {
   }
 
   const record = payload as Record<string, unknown>
+  const single = normalizeSingleClashProxy(record)
+  if (single) {
+    return [single]
+  }
   if (Array.isArray(record.proxies)) {
     return asArray(record.proxies)
   }
@@ -436,7 +542,7 @@ function normalizeDirectProtocol(raw: unknown): DirectImportForm['protocol'] {
   if (protocol === 'socks' || protocol === 'socket') {
     return 'socks5'
   }
-  throw new Error('protocol 仅支持 http / https / socks5')
+  throw new Error('protocol 仅支持 http / socks5')
 }
 
 function parseDirectProxyURL(raw: string): DirectImportForm {
@@ -668,45 +774,61 @@ export function buildDirectImportCandidatesFromText(raw: string): { candidates: 
   }
 }
 
-export function buildChainImportCandidate(form: ChainImportForm): ImportCandidate {
-  const parseHop = (label: string, hop: ChainHopForm): ChainSocks5HopConfig => {
-    const protocol = hop.protocol === 'socks5' ? 'socks5' : 'http'
-    const server = hop.server.trim()
-    if (!server) {
-      throw new Error(`请输入${label}代理地址`)
-    }
-    if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(server)) {
-      throw new Error(`${label}代理地址只需要填写主机名或 IP，不需要协议头`)
-    }
-
-    const portInput = hop.port.trim()
-    if (!portInput) {
-      throw new Error(`请输入${label}代理端口`)
-    }
-    if (!/^\d+$/.test(portInput)) {
-      throw new Error(`${label}代理端口必须为数字`)
-    }
-
-    const port = Number(portInput)
-    if (!Number.isInteger(port) || port < 1 || port > 65535) {
-      throw new Error(`${label}代理端口必须在 1-65535 之间`)
-    }
-
-    const username = hop.username.trim()
-    const password = hop.password
-    if (password && !username) {
-      throw new Error(`${label}填写密码时请同时填写账号`)
-    }
-
-    return {
-      protocol,
-      server,
-      port,
-      username: username || undefined,
-      password: password || undefined,
-    }
+function parseChainHopForm(label: string, hop: ChainHopForm): ChainSocks5HopConfig {
+  const protocol = hop.protocol === 'socks5' ? 'socks5' : 'http'
+  const server = hop.server.trim()
+  if (!server) {
+    throw new Error(`请输入${label}代理地址`)
+  }
+  if (/^[a-zA-Z][a-zA-Z0-9+.-]*:\/\//.test(server)) {
+    throw new Error(`${label}代理地址只需要填写主机名或 IP，不需要协议头`)
   }
 
+  const portInput = hop.port.trim()
+  if (!portInput) {
+    throw new Error(`请输入${label}代理端口`)
+  }
+  if (!/^\d+$/.test(portInput)) {
+    throw new Error(`${label}代理端口必须为数字`)
+  }
+
+  const port = Number(portInput)
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`${label}代理端口必须在 1-65535 之间`)
+  }
+
+  const username = hop.username.trim()
+  const password = hop.password
+  if (password && !username) {
+    throw new Error(`${label}填写密码时请同时填写账号`)
+  }
+
+  return {
+    protocol,
+    server,
+    port,
+    username: username || undefined,
+    password: password || undefined,
+  }
+}
+
+function parseChainFrontClashHop(form: ChainImportForm): ChainClashHopConfig {
+  const text = form.frontClashText.trim()
+  if (!text) {
+    throw new Error('请粘贴前置 Clash 节点 YAML')
+  }
+  const proxies = parseClashImportText(text)
+  if (proxies.length !== 1) {
+    throw new Error('前置 Clash 输入包含多个代理，请先点击“解析输入节点”并选择其中一个节点')
+  }
+  return {
+    type: 'clash',
+    name: form.frontClashName.trim() || proxies[0].name || undefined,
+    node: proxies[0],
+  }
+}
+
+export function buildChainImportCandidate(form: ChainImportForm): ImportCandidate {
   const localPortInput = form.localPort.trim()
   if (localPortInput && !/^\d+$/.test(localPortInput)) {
     throw new Error('本地监听端口必须为数字')
@@ -716,14 +838,22 @@ export function buildChainImportCandidate(form: ChainImportForm): ImportCandidat
     throw new Error('本地监听端口必须在 1-65535 之间')
   }
 
+  const first = form.frontMode === 'clash'
+    ? parseChainFrontClashHop(form)
+    : parseChainHopForm('第一层', form.first)
+  const second = parseChainHopForm('第二层', form.second)
   const payload: ChainSocks5Config = {
-    first: parseHop('第一层', form.first),
-    second: parseHop('第二层', form.second),
+    first,
+    second,
     localPort: localPort > 0 ? localPort : undefined,
   }
 
+  const firstName = isChainClashHopConfig(first)
+    ? first.name || first.node.name || 'clash'
+    : first.server
+
   return {
-    proxyName: form.proxyName.trim() || `链式代理-${payload.first.server}-${payload.second.server}`,
+    proxyName: form.proxyName.trim() || `链式代理-${firstName}-${second.server}`,
     proxyConfig: `${CHAIN_SOCKS5_PREFIX}${encodeURIComponent(JSON.stringify(payload))}`,
   }
 }
@@ -740,39 +870,19 @@ function parseOptionalChainPort(raw: unknown, label: string): number | undefined
 }
 
 function parseChainQuickImportHop(raw: unknown, label: string): ChainSocks5HopConfig {
-  if (!raw || typeof raw !== 'object') {
-    throw new Error(`${label}缺少配置`)
+  const hop = normalizeChainManualHop(raw)
+  if (!hop) {
+    throw new Error(`${label}缺少有效 http / socks5 配置`)
   }
+  return hop
+}
 
-  const hop = raw as Record<string, unknown>
-  const protocol = String(hop.protocol || 'socks5').trim().toLowerCase()
-  if (protocol !== 'socks5' && protocol !== 'http') {
-    throw new Error(`${label}仅支持 http / socks5`)
+function parseChainQuickImportFirstHop(raw: unknown): ChainFirstHopConfig {
+  const hop = normalizeChainFirstHop(raw)
+  if (!hop) {
+    throw new Error('第一层缺少有效 http / socks5 / Clash 配置')
   }
-
-  const server = String(hop.server || '').trim()
-  if (!server) {
-    throw new Error(`${label}缺少 server`)
-  }
-
-  const portValue = Number(hop.port)
-  if (!Number.isInteger(portValue) || portValue < 1 || portValue > 65535) {
-    throw new Error(`${label}缺少有效 port`)
-  }
-
-  const username = String(hop.username || '').trim()
-  const password = hop.password === undefined || hop.password === null ? '' : String(hop.password)
-  if (password && !username) {
-    throw new Error(`${label}填写 password 时请同时填写 username`)
-  }
-
-  return {
-    protocol: protocol === 'http' ? 'http' : 'socks5',
-    server,
-    port: portValue,
-    username: username || undefined,
-    password: password || undefined,
-  }
+  return hop
 }
 
 export function parseChainImportJSON(raw: string): { form: ChainImportForm; groupName: string } {
@@ -792,7 +902,7 @@ export function parseChainImportJSON(raw: string): { form: ChainImportForm; grou
     throw new Error('JSON 根节点必须是对象')
   }
 
-  const first = parseChainQuickImportHop(payload.first, '第一层')
+  const first = parseChainQuickImportFirstHop(payload.first)
   const second = parseChainQuickImportHop(payload.second, '第二层')
   const localPort = parseOptionalChainPort(payload.localPort, 'localPort')
   const proxyName = String(payload.name ?? payload.proxyName ?? '').trim()
@@ -802,13 +912,16 @@ export function parseChainImportJSON(raw: string): { form: ChainImportForm; grou
     form: {
       proxyName,
       localPort: localPort ? String(localPort) : '',
-      first: {
+      frontMode: isChainClashHopConfig(first) ? 'clash' : 'manual',
+      first: isChainClashHopConfig(first) ? { ...INITIAL_CHAIN_IMPORT_FORM.first } : {
         protocol: first.protocol,
         server: first.server,
         port: String(first.port),
         username: first.username || '',
         password: first.password || '',
       },
+      frontClashText: isChainClashHopConfig(first) ? proxyToYaml(first.node) : '',
+      frontClashName: isChainClashHopConfig(first) ? first.name || first.node.name || '' : '',
       second: {
         protocol: second.protocol,
         server: second.server,

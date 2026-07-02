@@ -236,6 +236,58 @@ proxies:
     servername: example.com
 \`\`\`
 
+## 链式代理
+
+链式代理用于需要“先通过一个可直连代理，再连接目标代理节点”的场景。例如部分国外代理 IP / Clash 节点只允许从国外网络连接，此时可以把一个可用的 HTTP/SOCKS5 作为第二跳，再把 Clash 节点作为前置第一跳。
+
+链路顺序：
+
+\`\`\`text
+Chromium -> 本地 127.0.0.1 SOCKS5 桥接 -> 第二跳 HTTP/SOCKS5 -> 第一跳前置代理 -> 目标网站
+\`\`\`
+
+当前支持两种两跳链路：
+
+- 前置 HTTP/SOCKS5 + 第二跳 HTTP/SOCKS5（兼容原有链式代理方案）
+- 前置 Clash 节点 + 第二跳 HTTP/SOCKS5
+
+前置 Clash 节点可以通过两种方式选择：
+
+1. 填写 Clash 订阅 URL，点击获取节点，然后从订阅节点列表中选择一个作为前置代理。
+2. 粘贴整份 Clash 订阅 YAML 或单个 Clash 节点 YAML，点击解析输入节点，然后从解析结果中选择一个作为前置代理。
+
+保存链式代理时，只会保存最终选中的单个前置节点，不会把整份订阅作为链式配置保存。第二跳仍只支持 HTTP/SOCKS5。
+
+### 链式代理 JSON 示例
+
+\`\`\`json
+{
+  "name": "Clash前置链路",
+  "group": "链式代理",
+  "localPort": "",
+  "first": {
+    "type": "clash",
+    "name": "前置节点名称",
+    "node": {
+      "name": "hk-vless",
+      "type": "vless",
+      "server": "example.com",
+      "port": 443,
+      "uuid": "your-uuid",
+      "tls": true,
+      "servername": "example.com"
+    }
+  },
+  "second": {
+    "protocol": "socks5",
+    "server": "second-hop.example.com",
+    "port": "1080",
+    "username": "",
+    "password": ""
+  }
+}
+\`\`\`
+
 ## 批量 DNS 示例
 
 \`\`\`yaml
@@ -249,7 +301,7 @@ dns:
 ## 应用内路径
 
 \`\`\`text
-代理池配置 -> 导入 Clash YAML / 录入 HTTP(S) / SOCKS5
+代理池配置 -> 导入 Clash YAML / 录入 HTTP(S) / SOCKS5 / 链式代理
 实例编辑页 -> 选择代理池节点
 \`\`\`
 

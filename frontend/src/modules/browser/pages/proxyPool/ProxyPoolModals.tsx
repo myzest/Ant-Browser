@@ -1,12 +1,14 @@
-﻿import { Button, FormItem, Input, Modal, Select, Table, Textarea } from '../../../../shared/components'
+import { Button, FormItem, Input, Modal, Select, Table, Textarea } from '../../../../shared/components'
 import type { TableColumn } from '../../../../shared/components/Table'
 import type { ProxyIPHealthResult } from '../../types'
 
 import {
+  CHAIN_CLASH_QUICK_IMPORT_TEMPLATE,
   CHAIN_QUICK_IMPORT_TEMPLATE,
   DIRECT_QUICK_IMPORT_TEMPLATE,
   DIRECT_PROXY_PROTOCOL_OPTIONS,
   type ChainImportForm,
+  type ClashProxy,
   type DirectImportForm,
   type ProxyDisplayInfo,
   type ProxyImportMode,
@@ -33,7 +35,11 @@ interface ProxyPoolImportModalProps {
   directImportText: string
   chainImportForm: ChainImportForm
   directImportForm: DirectImportForm
+  chainFrontClashUrl: string
+  chainFrontClashNodes: ClashProxy[]
+  chainFrontClashSelectedIndex: string
   fetchingImportUrl: boolean
+  fetchingChainFrontClashUrl: boolean
   canParseImport: boolean
   onClose: () => void
   onParse: () => void
@@ -41,6 +47,10 @@ interface ProxyPoolImportModalProps {
   onImportModeChange: (nextMode: ProxyImportMode) => void
   onImportUrlChange: (nextValue: string) => void
   onImportTextChange: (nextValue: string) => void
+  onChainFrontClashUrlChange: (nextValue: string) => void
+  onFetchChainFrontClashUrl: () => void
+  onParseChainFrontClashText: () => void
+  onSelectChainFrontClashNode: (nextIndex: string) => void
   onImportDnsServersChange: (nextValue: string) => void
   onImportNamePrefixChange: (nextValue: string) => void
   onImportGroupNameChange: (nextValue: string) => void
@@ -51,6 +61,7 @@ interface ProxyPoolImportModalProps {
   onChainImportFormChange: (patch: Partial<ChainImportForm>) => void
   onChainImportHopChange: (hop: 'first' | 'second', field: keyof ChainImportForm['first'], value: string) => void
   onFillChainTemplate: () => void
+  onFillChainClashTemplate: () => void
   onCopyChainTemplate: () => void
   onFillDirectTemplate: () => void
   onCopyDirectTemplate: () => void
@@ -71,7 +82,11 @@ export function ProxyPoolImportModal({
   directImportText,
   chainImportForm,
   directImportForm,
+  chainFrontClashUrl,
+  chainFrontClashNodes,
+  chainFrontClashSelectedIndex,
   fetchingImportUrl,
+  fetchingChainFrontClashUrl,
   canParseImport,
   onClose,
   onParse,
@@ -79,6 +94,10 @@ export function ProxyPoolImportModal({
   onImportModeChange,
   onImportUrlChange,
   onImportTextChange,
+  onChainFrontClashUrlChange,
+  onFetchChainFrontClashUrl,
+  onParseChainFrontClashText,
+  onSelectChainFrontClashNode,
   onImportDnsServersChange,
   onImportNamePrefixChange,
   onImportGroupNameChange,
@@ -89,6 +108,7 @@ export function ProxyPoolImportModal({
   onChainImportFormChange,
   onChainImportHopChange,
   onFillChainTemplate,
+  onFillChainClashTemplate,
   onCopyChainTemplate,
   onFillDirectTemplate,
   onCopyDirectTemplate,
@@ -136,8 +156,8 @@ export function ProxyPoolImportModal({
           {importMode === 'clash'
             ? '支持粘贴 Clash YAML，或通过订阅 URL 自动拉取并解析（含 proxies、dns、proxy-groups）'
             : importMode === 'direct'
-              ? '支持单条录入 HTTP / HTTPS / SOCKS5 代理，也支持 JSON 或多行标准代理文本批量导入，导入后直接生效，不走 Clash 桥接'
-              : '支持两层 SOCKS5 链式代理，使用 JSON 导入，导入后将由本地桥接生成 127.0.0.1 SOCKS5 供 Chromium 使用'}
+              ? '支持单条录入 HTTP / SOCKS5 代理，也支持 JSON 或多行标准代理文本批量导入，导入后直接生效，不走 Clash 桥接'
+              : '支持“前置 HTTP/SOCKS5 或 Clash 节点 + 第二层 HTTP/SOCKS5”的链式代理，导入后由本地桥接生成 127.0.0.1 SOCKS5 供 Chromium 使用'}
         </p>
         {importMode === 'clash' && (
           <>
@@ -227,7 +247,7 @@ export function ProxyPoolImportModal({
                 />
               </FormItem>
             </div>
-            <FormItem label="文本辅助（可选）" hint="支持单个 JSON、JSON 数组，或多行 http:// / https:// / socks5://，每行一个">
+            <FormItem label="文本辅助（可选）" hint="支持单个 JSON、JSON 数组，或多行 http://:// / socks5://，每行一个">
               <Textarea
                 value={directImportText}
                 onChange={(event) => onDirectImportTextChange(event.target.value)}
@@ -273,49 +293,119 @@ export function ProxyPoolImportModal({
               </FormItem>
             </div>
             <div className="rounded-md border border-[var(--color-border)] p-3 space-y-3">
-              <h4 className="text-sm font-medium text-[var(--color-text-primary)]">第一层代理</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <FormItem label="协议">
-                  <Select
-                    value={chainImportForm.first.protocol}
-                    onChange={(event) => onChainImportHopChange('first', 'protocol', event.target.value)}
-                    options={[
-                      { value: 'http', label: 'HTTP' },
-                      { value: 'socks5', label: 'SOCKS5' },
-                    ]}
-                  />
-                </FormItem>
-                <FormItem label="代理地址" required>
-                  <Input
-                    value={chainImportForm.first.server}
-                    onChange={(event) => onChainImportHopChange('first', 'server', event.target.value)}
-                    placeholder="代理地址"
-                  />
-                </FormItem>
-                <FormItem label="代理端口" required>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={chainImportForm.first.port}
-                    onChange={(event) => onChainImportHopChange('first', 'port', event.target.value)}
-                    placeholder="端口"
-                  />
-                </FormItem>
-                <FormItem label="账号（可选）">
-                  <Input
-                    value={chainImportForm.first.username}
-                    onChange={(event) => onChainImportHopChange('first', 'username', event.target.value)}
-                  />
-                </FormItem>
-                <FormItem label="密码（可选）">
-                  <Input
-                    type="password"
-                    value={chainImportForm.first.password}
-                    onChange={(event) => onChainImportHopChange('first', 'password', event.target.value)}
-                  />
-                </FormItem>
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-sm font-medium text-[var(--color-text-primary)]">前置代理</h4>
+                <Select
+                  value={chainImportForm.frontMode}
+                  onChange={(event) => onChainImportFormChange({ frontMode: event.target.value as ChainImportForm['frontMode'] })}
+                  options={[
+                    { value: 'manual', label: 'HTTP / SOCKS5' },
+                    { value: 'clash', label: 'Clash 节点' },
+                  ]}
+                />
               </div>
+              {chainImportForm.frontMode === 'manual' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FormItem label="协议">
+                    <Select
+                      value={chainImportForm.first.protocol}
+                      onChange={(event) => onChainImportHopChange('first', 'protocol', event.target.value)}
+                      options={[
+                        { value: 'http', label: 'HTTP' },
+                        { value: 'socks5', label: 'SOCKS5' },
+                      ]}
+                    />
+                  </FormItem>
+                  <FormItem label="代理地址" required>
+                    <Input
+                      value={chainImportForm.first.server}
+                      onChange={(event) => onChainImportHopChange('first', 'server', event.target.value)}
+                      placeholder="代理地址"
+                    />
+                  </FormItem>
+                  <FormItem label="代理端口" required>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={chainImportForm.first.port}
+                      onChange={(event) => onChainImportHopChange('first', 'port', event.target.value)}
+                      placeholder="端口"
+                    />
+                  </FormItem>
+                  <FormItem label="账号（可选）">
+                    <Input
+                      value={chainImportForm.first.username}
+                      onChange={(event) => onChainImportHopChange('first', 'username', event.target.value)}
+                    />
+                  </FormItem>
+                  <FormItem label="密码（可选）">
+                    <Input
+                      type="password"
+                      value={chainImportForm.first.password}
+                      onChange={(event) => onChainImportHopChange('first', 'password', event.target.value)}
+                    />
+                  </FormItem>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <FormItem label="前置 Clash 订阅 URL（可选）">
+                    <div className="flex gap-2">
+                      <Input
+                        value={chainFrontClashUrl}
+                        onChange={(event) => onChainFrontClashUrlChange(event.target.value)}
+                        placeholder="Clash 订阅 URL"
+                        className="flex-1"
+                      />
+                      <Button
+                        variant="secondary"
+                        onClick={onFetchChainFrontClashUrl}
+                        loading={fetchingChainFrontClashUrl}
+                        disabled={!chainFrontClashUrl.trim()}
+                      >
+                        获取节点
+                      </Button>
+                    </div>
+                  </FormItem>
+                  {chainFrontClashNodes.length > 0 && (
+                    <FormItem label="选择前置节点">
+                      <Select
+                        value={chainFrontClashSelectedIndex}
+                        onChange={(event) => onSelectChainFrontClashNode(event.target.value)}
+                        options={chainFrontClashNodes.map((node, index) => ({
+                          value: String(index),
+                          label: `${node.name || `节点 ${index + 1}`} (${String(node.type || '-').toUpperCase()})`,
+                        }))}
+                      />
+                    </FormItem>
+                  )}
+                  <FormItem label="前置节点名称（可选）">
+                    <Input
+                      value={chainImportForm.frontClashName}
+                      onChange={(event) => onChainImportFormChange({ frontClashName: event.target.value })}
+                      placeholder="留空使用 Clash 节点 name"
+                    />
+                  </FormItem>
+                  <FormItem label="前置 Clash 订阅 / 节点 YAML" required hint="可粘贴整份 Clash 订阅 YAML 或单个节点；解析后从列表中选择一个作为前置代理">
+                    <Textarea
+                      value={chainImportForm.frontClashText}
+                      onChange={(event) => onChainImportFormChange({ frontClashText: event.target.value })}
+                      rows={8}
+                      placeholder={`proxies:\n  - name: vless-v6\n    type: vless\n    server: example.com\n    port: 443\n    uuid: your-uuid\n    ...`}
+                    />
+                    <div className="mt-2 flex gap-2">
+                      <Button
+                        size="sm"
+                        variant="secondary"
+                        onClick={onParseChainFrontClashText}
+                        disabled={!chainImportForm.frontClashText.trim()}
+                      >
+                        解析输入节点
+                      </Button>
+                    </div>
+                  </FormItem>
+                </div>
+              )}
             </div>
             <div className="rounded-md border border-[var(--color-border)] p-3 space-y-3">
               <h4 className="text-sm font-medium text-[var(--color-text-primary)]">第二层代理</h4>
@@ -367,11 +457,14 @@ export function ProxyPoolImportModal({
                 value={chainImportText}
                 onChange={(event) => onChainImportTextChange(event.target.value)}
                 rows={10}
-                placeholder={CHAIN_QUICK_IMPORT_TEMPLATE}
+                placeholder={chainImportForm.frontMode === 'clash' ? CHAIN_CLASH_QUICK_IMPORT_TEMPLATE : CHAIN_QUICK_IMPORT_TEMPLATE}
               />
               <div className="mt-2 flex gap-2">
                 <Button size="sm" variant="secondary" onClick={onFillChainTemplate}>
-                  填入模板
+                  填入 HTTP/SOCKS5 模板
+                </Button>
+                <Button size="sm" variant="secondary" onClick={onFillChainClashTemplate}>
+                  填入 Clash 前置模板
                 </Button>
                 <Button size="sm" variant="secondary" onClick={onCopyChainTemplate}>
                   复制模板
@@ -589,47 +682,76 @@ export function ProxyPoolEditModal({
               />
             </FormItem>
             <div className="rounded-md border border-[var(--color-border)] p-3 space-y-3">
-              <h4 className="text-sm font-medium text-[var(--color-text-primary)]">第一层代理</h4>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <FormItem label="协议">
-                  <Select
-                    value={chainEditForm.first.protocol}
-                    onChange={(event) => onChainEditHopChange('first', 'protocol', event.target.value)}
-                    options={[
-                      { value: 'http', label: 'HTTP' },
-                      { value: 'socks5', label: 'SOCKS5' },
-                    ]}
-                  />
-                </FormItem>
-                <FormItem label="代理地址" required>
-                  <Input
-                    value={chainEditForm.first.server}
-                    onChange={(event) => onChainEditHopChange('first', 'server', event.target.value)}
-                  />
-                </FormItem>
-                <FormItem label="代理端口" required>
-                  <Input
-                    type="number"
-                    min={1}
-                    max={65535}
-                    value={chainEditForm.first.port}
-                    onChange={(event) => onChainEditHopChange('first', 'port', event.target.value)}
-                  />
-                </FormItem>
-                <FormItem label="账号（可选）">
-                  <Input
-                    value={chainEditForm.first.username}
-                    onChange={(event) => onChainEditHopChange('first', 'username', event.target.value)}
-                  />
-                </FormItem>
-                <FormItem label="密码（可选）">
-                  <Input
-                    type="password"
-                    value={chainEditForm.first.password}
-                    onChange={(event) => onChainEditHopChange('first', 'password', event.target.value)}
-                  />
-                </FormItem>
+              <div className="flex items-center justify-between gap-3">
+                <h4 className="text-sm font-medium text-[var(--color-text-primary)]">前置代理</h4>
+                <Select
+                  value={chainEditForm.frontMode}
+                  onChange={(event) => onChainEditFormChange({ frontMode: event.target.value as ChainImportForm['frontMode'] })}
+                  options={[
+                    { value: 'manual', label: 'HTTP / SOCKS5' },
+                    { value: 'clash', label: 'Clash 节点' },
+                  ]}
+                />
               </div>
+              {chainEditForm.frontMode === 'manual' ? (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <FormItem label="协议">
+                    <Select
+                      value={chainEditForm.first.protocol}
+                      onChange={(event) => onChainEditHopChange('first', 'protocol', event.target.value)}
+                      options={[
+                        { value: 'http', label: 'HTTP' },
+                        { value: 'socks5', label: 'SOCKS5' },
+                      ]}
+                    />
+                  </FormItem>
+                  <FormItem label="代理地址" required>
+                    <Input
+                      value={chainEditForm.first.server}
+                      onChange={(event) => onChainEditHopChange('first', 'server', event.target.value)}
+                    />
+                  </FormItem>
+                  <FormItem label="代理端口" required>
+                    <Input
+                      type="number"
+                      min={1}
+                      max={65535}
+                      value={chainEditForm.first.port}
+                      onChange={(event) => onChainEditHopChange('first', 'port', event.target.value)}
+                    />
+                  </FormItem>
+                  <FormItem label="账号（可选）">
+                    <Input
+                      value={chainEditForm.first.username}
+                      onChange={(event) => onChainEditHopChange('first', 'username', event.target.value)}
+                    />
+                  </FormItem>
+                  <FormItem label="密码（可选）">
+                    <Input
+                      type="password"
+                      value={chainEditForm.first.password}
+                      onChange={(event) => onChainEditHopChange('first', 'password', event.target.value)}
+                    />
+                  </FormItem>
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <FormItem label="前置节点名称（可选）">
+                    <Input
+                      value={chainEditForm.frontClashName}
+                      onChange={(event) => onChainEditFormChange({ frontClashName: event.target.value })}
+                      placeholder="留空使用 Clash 节点 name"
+                    />
+                  </FormItem>
+                  <FormItem label="前置 Clash 节点 YAML" required>
+                    <Textarea
+                      value={chainEditForm.frontClashText}
+                      onChange={(event) => onChainEditFormChange({ frontClashText: event.target.value })}
+                      rows={8}
+                    />
+                  </FormItem>
+                </div>
+              )}
             </div>
             <div className="rounded-md border border-[var(--color-border)] p-3 space-y-3">
               <h4 className="text-sm font-medium text-[var(--color-text-primary)]">第二层代理</h4>
