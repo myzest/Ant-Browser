@@ -336,6 +336,9 @@ func Generate(lib *Library, opts GenerateOptions) (*Profile, error) {
 	platform := NormalizePlatform(opts.Platform)
 	regionMode := NormalizeRegionMode(opts.RegionMode)
 	locale, timezone, country := lib.localeTimezone(opts.Country, opts.Locale, opts.Timezone)
+	if regionMode == RegionModeProxy {
+		locale, timezone, country = lib.proxyRegionDefaults(opts.Country, opts.Locale, opts.Timezone)
+	}
 	if regionMode == RegionModeSystem && strings.TrimSpace(opts.Locale) == "" && strings.TrimSpace(opts.Timezone) == "" {
 		locale, timezone = "zh-CN", "Asia/Shanghai"
 		country = "CN"
@@ -799,6 +802,36 @@ func RegionDefaults(country string, locale string, timezone string) (string, str
 	return LoadLibrary().localeTimezone(country, locale, timezone)
 }
 
+func ProxyRegionDefaults(country string, locale string, timezone string) (string, string, string) {
+	return LoadLibrary().proxyRegionDefaults(country, locale, timezone)
+}
+
+func (lib *Library) proxyRegionDefaults(country string, locale string, timezone string) (string, string, string) {
+	locale = strings.TrimSpace(locale)
+	timezone = strings.TrimSpace(timezone)
+	country = normalizeCountry(country, locale, timezone)
+	region, ok := lib.regions[country]
+	if !ok {
+		region = defaultRegions()["CN"]
+		country = "CN"
+	}
+	if locale == "" || !languageTagListContains(region.Locales, locale) {
+		if len(region.Locales) > 0 {
+			locale = region.Locales[0]
+		} else {
+			locale = "zh-CN"
+		}
+	}
+	if timezone == "" || !stringListContainsFold(region.Timezones, timezone) {
+		if len(region.Timezones) > 0 {
+			timezone = region.Timezones[0]
+		} else {
+			timezone = "Asia/Shanghai"
+		}
+	}
+	return locale, timezone, country
+}
+
 func AcceptLanguageDefaults(country string, locale string) string {
 	acceptLanguage, _ := LoadLibrary().languageStack(country, locale)
 	return acceptLanguage
@@ -1255,14 +1288,33 @@ func deviceTemplate(id string, weight int, platform string, deviceClass string, 
 
 func normalizeCountry(country string, locale string, timezone string) string {
 	value := strings.ToUpper(strings.TrimSpace(country))
-	switch value {
-	case "USA":
+	compactValue := strings.NewReplacer(" ", "", "-", "", "_", "", ".", "", ",", "").Replace(value)
+	switch compactValue {
+	case "US", "USA", "UNITEDSTATES", "UNITEDSTATESOFAMERICA", "AMERICA":
 		return "US"
-	case "UK":
+	case "GB", "UK", "UNITEDKINGDOM", "GREATBRITAIN", "BRITAIN", "ENGLAND":
 		return "GB"
+	case "DE", "DEU", "GERMANY", "DEUTSCHLAND":
+		return "DE"
+	case "FR", "FRA", "FRANCE":
+		return "FR"
+	case "JP", "JPN", "JAPAN":
+		return "JP"
+	case "KR", "KOR", "KOREA", "SOUTHKOREA", "REPUBLICOFKOREA":
+		return "KR"
+	case "SG", "SGP", "SINGAPORE":
+		return "SG"
+	case "BR", "BRA", "BRAZIL", "BRASIL":
+		return "BR"
+	case "IN", "IND", "INDIA":
+		return "IN"
+	case "CN", "CHN", "CHINA", "PRC", "PEOPLESREPUBLICOFCHINA":
+		return "CN"
 	case "":
 	default:
-		return value
+		if len(compactValue) == 2 {
+			return compactValue
+		}
 	}
 	combined := strings.ToLower(strings.TrimSpace(locale) + "|" + strings.TrimSpace(timezone))
 	switch {
@@ -1504,6 +1556,19 @@ func languagesForLocale(locale string) []string {
 		languages = append(languages, base)
 	}
 	return normalizeLanguageTags(languages)
+}
+
+func stringListContainsFold(items []string, want string) bool {
+	want = strings.TrimSpace(want)
+	if want == "" {
+		return false
+	}
+	for _, item := range items {
+		if strings.EqualFold(strings.TrimSpace(item), want) {
+			return true
+		}
+	}
+	return false
 }
 
 func languageTagListContains(items []string, want string) bool {

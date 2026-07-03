@@ -181,14 +181,10 @@ func temporaryProxyRegionContextFromProxy(item BrowserProxy) fingerprint.Validat
 		ctx = mergeProxyRegionContext(ctx, cached)
 	}
 	if strings.TrimSpace(ctx.ProxyCountry) != "" || strings.TrimSpace(ctx.ProxyLocale) != "" || strings.TrimSpace(ctx.ProxyTimezone) != "" {
-		locale, timezone, country := fingerprint.RegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
+		locale, timezone, country := fingerprint.ProxyRegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
 		ctx.ProxyCountry = country
-		if strings.TrimSpace(ctx.ProxyLocale) == "" {
-			ctx.ProxyLocale = locale
-		}
-		if strings.TrimSpace(ctx.ProxyTimezone) == "" {
-			ctx.ProxyTimezone = timezone
-		}
+		ctx.ProxyLocale = locale
+		ctx.ProxyTimezone = timezone
 	}
 	return ctx
 }
@@ -215,7 +211,7 @@ func temporaryProxyRegionLaunchArgs(ctx fingerprint.ValidationContext) []string 
 		return nil
 	}
 
-	locale, timezone, country := fingerprint.RegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
+	locale, timezone, country := fingerprint.ProxyRegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
 	args := []string{}
 	if locale != "" {
 		args = append(args,

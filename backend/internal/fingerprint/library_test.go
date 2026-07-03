@@ -277,6 +277,25 @@ func TestGenerateAddsLocaleLanguageStack(t *testing.T) {
 	}
 }
 
+func TestGenerateProxyModeCalibratesLocaleTimezoneToCountry(t *testing.T) {
+	t.Parallel()
+
+	profile, err := Generate(LoadLibrary(), GenerateOptions{
+		ProfileID:  "profile-proxy-us",
+		Platform:   "windows",
+		RegionMode: RegionModeProxy,
+		Country:    "UNITED STATES",
+		Locale:     "zh-CN",
+		Timezone:   "Asia/Shanghai",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if profile.Country != "US" || profile.Locale != "en-US" || profile.Timezone != "America/New_York" || profile.AcceptLanguage != "en-US,en;q=0.9" {
+		t.Fatalf("expected proxy mode to calibrate to US/en-US/America_New_York, got country=%q locale=%q timezone=%q acceptLanguage=%q", profile.Country, profile.Locale, profile.Timezone, profile.AcceptLanguage)
+	}
+}
+
 func TestMediaCapabilitiesForPlatform(t *testing.T) {
 	t.Parallel()
 
@@ -593,4 +612,33 @@ func hasArgPrefix(items []string, prefix string) bool {
 		}
 	}
 	return false
+}
+
+func TestProxyRegionDefaultsNormalizesCountryNamesAndCalibratesLocaleTimezone(t *testing.T) {
+	t.Parallel()
+
+	locale, timezone, country := ProxyRegionDefaults("UNITED STATES", "zh-CN", "Asia/Shanghai")
+	if country != "US" || locale != "en-US" || timezone != "America/New_York" {
+		t.Fatalf("expected United States to calibrate to US/en-US/America_New_York, got country=%q locale=%q timezone=%q", country, locale, timezone)
+	}
+}
+
+func TestValidateArgsWithProxyRegionAcceptsCountryNameAfterCalibration(t *testing.T) {
+	t.Parallel()
+
+	report := HealthWithContext([]string{
+		"--fingerprint=111",
+		"--fingerprint-brand=Chrome",
+		"--fingerprint-platform=windows",
+		"--lang=en-US",
+		"--fingerprint-locale=en-US",
+		"--timezone=America/New_York",
+		"--fingerprint-timezone=America/New_York",
+		"--fingerprint-fonts=Arial,Calibri",
+		"--fingerprint-webgl-vendor=Intel",
+		"--fingerprint-webgl-renderer=Intel(R) UHD Graphics 630",
+	}, ValidationContext{ProxyCountry: "UNITED STATES"})
+	if hasIssue(report, "proxy_locale_mismatch") || hasIssue(report, "proxy_timezone_mismatch") {
+		t.Fatalf("expected calibrated United States proxy region to match generated args, got %#v", report.Issues)
+	}
 }

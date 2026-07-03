@@ -64,7 +64,7 @@ func TestBuildProxyIPHealthResultBackfillsRegionDefaults(t *testing.T) {
 	}
 }
 
-func TestPersistProxyIPHealthDefaultRegionDoesNotOverrideExistingProxyTimezone(t *testing.T) {
+func TestPersistProxyIPHealthCalibratesCountryLocaleAndTimezone(t *testing.T) {
 	t.Parallel()
 
 	cfg := config.DefaultConfig()
@@ -72,9 +72,9 @@ func TestPersistProxyIPHealthDefaultRegionDoesNotOverrideExistingProxyTimezone(t
 		{
 			ProxyId:   "proxy-us-west",
 			ProxyName: "US West",
-			Country:   "US",
-			Locale:    "en-US",
-			Timezone:  "America/Los_Angeles",
+			Country:   "UNITED STATES",
+			Locale:    "zh-CN",
+			Timezone:  "Asia/Shanghai",
 		},
 	}}
 	app := NewApp("")
@@ -83,16 +83,48 @@ func TestPersistProxyIPHealthDefaultRegionDoesNotOverrideExistingProxyTimezone(t
 	app.browserMgr.ProxyDAO = dao
 
 	app.persistProxyIPHealthResult(buildProxyIPHealthResult("proxy-us-west", map[string]interface{}{
-		"ip":      "203.0.113.10",
-		"country": "US",
+		"ip":       "203.0.113.10",
+		"country":  "UNITED STATES",
+		"locale":   "zh-CN",
+		"timezone": "Asia/Shanghai",
 	}, nil))
 
 	got := dao.proxies[0]
-	if got.Timezone != "America/Los_Angeles" {
-		t.Fatalf("existing precise timezone was overwritten: %#v", got)
+	if got.Country != "US" || got.Locale != "en-US" || got.Timezone != "America/New_York" {
+		t.Fatalf("proxy region should be calibrated, got %#v", got)
 	}
 	if dao.lastIPHealthJSON == "" {
 		t.Fatal("expected IP health JSON to be persisted")
+	}
+}
+
+func TestSaveBrowserProxiesCalibratesAllProxyTypesRegion(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.DefaultConfig()
+	app := NewApp("")
+	app.config = cfg
+	app.browserMgr = browser.NewManager(cfg, "")
+
+	proxies := []BrowserProxy{
+		{ProxyId: "proxy-http", ProxyName: "HTTP", ProxyConfig: "http://127.0.0.1:8080", Country: "UNITED STATES", Locale: "zh-CN", Timezone: "Asia/Shanghai"},
+		{ProxyId: "proxy-clash", ProxyName: "Clash", ProxyConfig: `name: us
+type: vmess
+server: example.com
+port: 443`, Country: "United States", Locale: "zh-CN", Timezone: "Asia/Shanghai"},
+		{ProxyId: "proxy-chain", ProxyName: "Chain", ProxyConfig: "chain+socks5://example", Country: "USA", Locale: "zh-CN", Timezone: "Asia/Shanghai"},
+	}
+	if err := app.SaveBrowserProxies(proxies); err != nil {
+		t.Fatalf("SaveBrowserProxies returned error: %v", err)
+	}
+
+	for _, item := range app.config.Browser.Proxies {
+		if item.ProxyId == "__direct__" {
+			continue
+		}
+		if item.Country != "US" || item.Locale != "en-US" || item.Timezone != "America/New_York" {
+			t.Fatalf("proxy %s should be calibrated regardless of type: %#v", item.ProxyId, item)
+		}
 	}
 }
 

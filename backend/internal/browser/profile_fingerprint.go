@@ -70,14 +70,10 @@ func proxyFingerprintRegionContextFromProxy(proxy Proxy) fingerprint.ValidationC
 		ctx = mergeProxyFingerprintRegionContext(ctx, cached)
 	}
 	if ctx.ProxyCountry != "" || ctx.ProxyLocale != "" || ctx.ProxyTimezone != "" {
-		locale, timezone, country := fingerprint.RegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
+		locale, timezone, country := fingerprint.ProxyRegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
 		ctx.ProxyCountry = country
-		if ctx.ProxyLocale == "" {
-			ctx.ProxyLocale = locale
-		}
-		if ctx.ProxyTimezone == "" {
-			ctx.ProxyTimezone = timezone
-		}
+		ctx.ProxyLocale = locale
+		ctx.ProxyTimezone = timezone
 	}
 	return ctx
 }
@@ -100,14 +96,10 @@ func proxyFingerprintRegionContextFromIPHealthJSON(raw string) (fingerprint.Vali
 		return fingerprint.ValidationContext{}, false
 	}
 	if ctx.ProxyCountry != "" || ctx.ProxyLocale != "" || ctx.ProxyTimezone != "" {
-		locale, timezone, country := fingerprint.RegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
+		locale, timezone, country := fingerprint.ProxyRegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
 		ctx.ProxyCountry = country
-		if ctx.ProxyLocale == "" {
-			ctx.ProxyLocale = locale
-		}
-		if ctx.ProxyTimezone == "" {
-			ctx.ProxyTimezone = timezone
-		}
+		ctx.ProxyLocale = locale
+		ctx.ProxyTimezone = timezone
 	}
 	return ctx, true
 }
@@ -129,7 +121,7 @@ func applyProxyRegionToFingerprintBaseArgs(baseArgs []string, proxyCtx fingerpri
 	if proxyCtx.ProxyCountry == "" && proxyCtx.ProxyLocale == "" && proxyCtx.ProxyTimezone == "" {
 		return append([]string{}, baseArgs...)
 	}
-	locale, timezone, _ := fingerprint.RegionDefaults(proxyCtx.ProxyCountry, proxyCtx.ProxyLocale, proxyCtx.ProxyTimezone)
+	locale, timezone, _ := fingerprint.ProxyRegionDefaults(proxyCtx.ProxyCountry, proxyCtx.ProxyLocale, proxyCtx.ProxyTimezone)
 	out := append([]string{}, baseArgs...)
 	if locale != "" {
 		out = replaceOrAppendFingerprintBaseArg(out, "--lang", locale)

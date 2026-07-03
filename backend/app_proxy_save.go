@@ -2,6 +2,7 @@ package backend
 
 import (
 	"ant-chrome/backend/internal/config"
+	"ant-chrome/backend/internal/fingerprint"
 	"ant-chrome/backend/internal/logger"
 	"strings"
 )
@@ -44,15 +45,21 @@ func (a *App) SaveBrowserProxies(proxies []BrowserProxy) error {
 			sourceAutoRefresh = false
 			sourceRefreshIntervalM = 0
 		}
+		country := strings.TrimSpace(item.Country)
+		locale := strings.TrimSpace(item.Locale)
+		timezone := strings.TrimSpace(item.Timezone)
+		if country != "" || locale != "" || timezone != "" {
+			locale, timezone, country = fingerprint.ProxyRegionDefaults(country, locale, timezone)
+		}
 		normalized = append(normalized, BrowserProxy{
 			ProxyId:                proxyID,
 			ProxyName:              proxyName,
 			ProxyConfig:            proxyConfig,
-			Country:                strings.TrimSpace(item.Country),
+			Country:                country,
 			Region:                 strings.TrimSpace(item.Region),
 			City:                   strings.TrimSpace(item.City),
-			Timezone:               strings.TrimSpace(item.Timezone),
-			Locale:                 strings.TrimSpace(item.Locale),
+			Timezone:               timezone,
+			Locale:                 locale,
 			DnsServers:             strings.TrimSpace(item.DnsServers),
 			GroupName:              strings.TrimSpace(item.GroupName),
 			SourceID:               sourceID,

@@ -42,12 +42,15 @@ func (a *App) GenerateFingerprintProfile(request FingerprintGenerateRequest) Fin
 	current := fingerprint.ParseArgs(request.CurrentArgs)
 	regionMode := fingerprint.NormalizeRegionMode(request.RegionMode)
 	proxyCtx := a.fingerprintProxyRegionContext(request.ProxyID, request.ProxyConfig)
+	if hasProxyRegionContext(proxyCtx) {
+		regionMode = fingerprint.RegionModeProxy
+	}
 	platform := request.Platform
 	if strings.TrimSpace(platform) == "" {
 		platform = current["--fingerprint-platform"]
 	}
 	locale := request.Locale
-	if regionMode == fingerprint.RegionModeProxy && strings.TrimSpace(locale) == "" {
+	if regionMode == fingerprint.RegionModeProxy {
 		locale = proxyCtx.ProxyLocale
 	}
 	if strings.TrimSpace(locale) == "" && regionMode == fingerprint.RegionModeManual {
@@ -57,7 +60,7 @@ func (a *App) GenerateFingerprintProfile(request FingerprintGenerateRequest) Fin
 		locale = current["--lang"]
 	}
 	timezone := request.Timezone
-	if regionMode == fingerprint.RegionModeProxy && strings.TrimSpace(timezone) == "" {
+	if regionMode == fingerprint.RegionModeProxy {
 		timezone = proxyCtx.ProxyTimezone
 	}
 	if strings.TrimSpace(timezone) == "" && regionMode == fingerprint.RegionModeManual {
@@ -88,7 +91,7 @@ func (a *App) GenerateFingerprintProfile(request FingerprintGenerateRequest) Fin
 	}
 
 	country := request.Country
-	if regionMode == fingerprint.RegionModeProxy && strings.TrimSpace(country) == "" {
+	if regionMode == fingerprint.RegionModeProxy {
 		country = proxyCtx.ProxyCountry
 	}
 	generated, err := fingerprint.Generate(fingerprint.LoadLibrary(), fingerprint.GenerateOptions{
@@ -131,6 +134,10 @@ func (a *App) GenerateFingerprintProfile(request FingerprintGenerateRequest) Fin
 
 func (a *App) ValidateFingerprintProfile(request FingerprintValidateRequest) fingerprint.HealthReport {
 	return fingerprint.HealthWithContext(request.Args, a.fingerprintProxyRegionContext(request.ProxyID, request.ProxyConfig))
+}
+
+func hasProxyRegionContext(ctx fingerprint.ValidationContext) bool {
+	return strings.TrimSpace(ctx.ProxyCountry) != "" || strings.TrimSpace(ctx.ProxyLocale) != "" || strings.TrimSpace(ctx.ProxyTimezone) != ""
 }
 
 func unknownFingerprintArgs(args []string) []string {
@@ -242,14 +249,11 @@ func proxyRegionContextFromProxy(item BrowserProxy) fingerprint.ValidationContex
 	if cached, ok := proxyRegionContextFromIPHealthJSON(item.LastIPHealthJSON); ok {
 		ctx = mergeProxyRegionContext(ctx, cached)
 	}
-	if ctx.ProxyCountry != "" && (ctx.ProxyLocale == "" || ctx.ProxyTimezone == "") {
-		locale, timezone, _ := fingerprint.RegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
-		if ctx.ProxyLocale == "" {
-			ctx.ProxyLocale = locale
-		}
-		if ctx.ProxyTimezone == "" {
-			ctx.ProxyTimezone = timezone
-		}
+	if ctx.ProxyCountry != "" || ctx.ProxyLocale != "" || ctx.ProxyTimezone != "" {
+		locale, timezone, country := fingerprint.ProxyRegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
+		ctx.ProxyCountry = country
+		ctx.ProxyLocale = locale
+		ctx.ProxyTimezone = timezone
 	}
 	return ctx
 }
@@ -272,14 +276,11 @@ func proxyRegionContextFromIPHealthJSON(raw string) (fingerprint.ValidationConte
 		ProxyTimezone: strings.TrimSpace(result.Timezone),
 		ProxyIP:       strings.TrimSpace(result.IP),
 	}
-	if ctx.ProxyCountry != "" {
-		locale, timezone, _ := fingerprint.RegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
-		if ctx.ProxyLocale == "" {
-			ctx.ProxyLocale = locale
-		}
-		if ctx.ProxyTimezone == "" {
-			ctx.ProxyTimezone = timezone
-		}
+	if ctx.ProxyCountry != "" || ctx.ProxyLocale != "" || ctx.ProxyTimezone != "" {
+		locale, timezone, country := fingerprint.ProxyRegionDefaults(ctx.ProxyCountry, ctx.ProxyLocale, ctx.ProxyTimezone)
+		ctx.ProxyCountry = country
+		ctx.ProxyLocale = locale
+		ctx.ProxyTimezone = timezone
 	}
 	return ctx, ctx.ProxyCountry != "" || ctx.ProxyIP != ""
 }
@@ -301,10 +302,16 @@ func mergeProxyRegionContext(base fingerprint.ValidationContext, cached fingerpr
 }
 
 func (a *App) getLatestProxiesSafe() []BrowserProxy {
-	if a == nil || a.browserMgr == nil || a.config == nil {
+	if a == nil {
 		return nil
 	}
-	return a.getLatestProxies()
+	if a.browserMgr != nil {
+		return a.getLatestProxies()
+	}
+	if a.config != nil {
+		return a.config.Browser.Proxies
+	}
+	return nil
 }
 
 func countryFromProxyText(value string) string {

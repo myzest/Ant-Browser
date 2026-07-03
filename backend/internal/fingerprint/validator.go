@@ -201,7 +201,7 @@ func validateProxyRegion(values map[string]string, ctx ValidationContext) []Vali
 		return nil
 	}
 	lib := LoadLibrary()
-	expectedLocale, expectedTimezone, normalizedCountry := lib.localeTimezone(country, ctx.ProxyLocale, ctx.ProxyTimezone)
+	expectedLocale, expectedTimezone, normalizedCountry := lib.proxyRegionDefaults(country, ctx.ProxyLocale, ctx.ProxyTimezone)
 	if normalizedCountry == "" {
 		normalizedCountry = country
 	}

@@ -264,6 +264,91 @@ func TestGenerateFingerprintProfileUsesProxyIPHealthCache(t *testing.T) {
 	}
 }
 
+func TestGenerateFingerprintProfileCalibratesProxyCountryNameLocaleAndTimezone(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.DefaultConfig()
+	cfg.Browser.Proxies = []config.BrowserProxy{
+		{
+			ProxyId:     "proxy-us-name",
+			ProxyName:   "US Name",
+			ProxyConfig: "chain+socks5://example",
+			Country:     "UNITED STATES",
+			Locale:      "zh-CN",
+			Timezone:    "Asia/Shanghai",
+		},
+	}
+	app := NewApp("")
+	app.config = cfg
+	app.browserMgr = browser.NewManager(cfg, "")
+	proxyCtx := app.fingerprintProxyRegionContext("proxy-us-name", "")
+	if proxyCtx.ProxyCountry != "US" || proxyCtx.ProxyLocale != "en-US" || proxyCtx.ProxyTimezone != "America/New_York" {
+		t.Fatalf("proxy context not calibrated: %#v", proxyCtx)
+	}
+
+	result := app.GenerateFingerprintProfile(FingerprintGenerateRequest{
+		ProfileID:  "profile-proxy-country-name",
+		Platform:   "windows",
+		RegionMode: "proxy",
+		ProxyID:    "proxy-us-name",
+	})
+	for _, want := range []string{
+		"--lang=en-US",
+		"--fingerprint-locale=en-US",
+		"--fingerprint-accept-language=en-US,en;q=0.9",
+		"--timezone=America/New_York",
+		"--fingerprint-timezone=America/New_York",
+	} {
+		if !containsString(result.Args, want) {
+			t.Fatalf("generated calibrated proxy region args missing %q: %v", want, result.Args)
+		}
+	}
+	if hasFingerprintIssue(result.Health.Issues, "proxy_locale_mismatch") || hasFingerprintIssue(result.Health.Issues, "proxy_timezone_mismatch") {
+		t.Fatalf("expected calibrated proxy region to avoid mismatch warnings, got %#v", result.Health.Issues)
+	}
+}
+
+func TestGenerateFingerprintProfileSelectedProxyOverridesManualRegion(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.DefaultConfig()
+	cfg.Browser.Proxies = []config.BrowserProxy{
+		{
+			ProxyId:     "proxy-us-selected",
+			ProxyName:   "US Selected",
+			ProxyConfig: "http://127.0.0.1:18080",
+			Country:     "US",
+		},
+	}
+	app := NewApp("")
+	app.config = cfg
+	app.browserMgr = browser.NewManager(cfg, "")
+
+	result := app.GenerateFingerprintProfile(FingerprintGenerateRequest{
+		ProfileID:  "profile-proxy-overrides-manual",
+		Platform:   "windows",
+		RegionMode: "manual",
+		Country:    "CN",
+		Locale:     "zh-CN",
+		Timezone:   "Asia/Shanghai",
+		ProxyID:    "proxy-us-selected",
+	})
+	for _, want := range []string{
+		"--lang=en-US",
+		"--fingerprint-locale=en-US",
+		"--fingerprint-accept-language=en-US,en;q=0.9",
+		"--timezone=America/New_York",
+		"--fingerprint-timezone=America/New_York",
+	} {
+		if !containsString(result.Args, want) {
+			t.Fatalf("selected proxy should override manual region, missing %q: %v health=%#v", want, result.Args, result.Health)
+		}
+	}
+	if hasFingerprintIssue(result.Health.Issues, "proxy_locale_mismatch") || hasFingerprintIssue(result.Health.Issues, "proxy_timezone_mismatch") {
+		t.Fatalf("expected selected proxy to avoid mismatch warnings, got %#v args=%v", result.Health.Issues, result.Args)
+	}
+}
+
 func TestValidateFingerprintProfileReportsRedIssues(t *testing.T) {
 	t.Parallel()
 
@@ -307,4 +392,13 @@ func fingerprintArgValue(items []string, want string) string {
 		}
 	}
 	return ""
+}
+
+func hasFingerprintIssue(issues []fingerprint.ValidationIssue, code string) bool {
+	for _, issue := range issues {
+		if issue.Code == code {
+			return true
+		}
+	}
+	return false
 }

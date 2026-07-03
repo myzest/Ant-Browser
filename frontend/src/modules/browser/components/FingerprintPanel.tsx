@@ -204,6 +204,15 @@ const REGION_MODE_OPTIONS = [
   { value: 'system', label: '跟随系统' },
 ]
 
+const DIRECT_PROXY_ID = '__direct__'
+
+function hasEffectiveProxy(proxyId?: string, proxyConfig?: string): boolean {
+  const id = (proxyId || '').trim()
+  const config = (proxyConfig || '').trim()
+  if (id && id !== DIRECT_PROXY_ID) return true
+  return !!config && config.toLowerCase() !== 'direct://'
+}
+
 function fingerprintHealthLabel(health: FingerprintHealthReport): string {
   const statusLabel = health.status === 'red' ? '本地预检高风险' : health.status === 'yellow' ? '本地预检需复核' : '本地预检通过'
   const issueCount = health.issues?.length || 0
@@ -254,6 +263,14 @@ export function FingerprintPanel({ value, onChange, profileId, proxyId, proxyCon
   const [validating, setValidating] = useState(false)
   const [health, setHealth] = useState<FingerprintHealthReport | null>(null)
   const [healthArgsKey, setHealthArgsKey] = useState('')
+  const proxyRegionLocked = hasEffectiveProxy(proxyId, proxyConfig)
+  const effectiveRegionMode: 'manual' | 'proxy' | 'system' = proxyRegionLocked ? 'proxy' : regionMode
+
+  useEffect(() => {
+    if (proxyRegionLocked) {
+      setRegionMode('proxy')
+    }
+  }, [proxyRegionLocked])
 
   const syncQuickControls = (next: FingerprintConfig) => {
     syncQuickControlsFromConfig(next, setQuickPlatform, setQuickCountry)
@@ -305,12 +322,12 @@ export function FingerprintPanel({ value, onChange, profileId, proxyId, proxyCon
     setGenerating(true)
     try {
       const region = regionForCountry(quickCountry)
-      const manualRegion = regionMode === 'manual'
+      const manualRegion = effectiveRegionMode === 'manual'
       const result = await generateFingerprintProfile({
         currentArgs: options?.resetCurrent ? [] : serialize(config),
         profileId,
         platform: quickPlatform,
-        regionMode,
+        regionMode: effectiveRegionMode,
         country: manualRegion ? quickCountry : undefined,
         locale: manualRegion ? region.locale : undefined,
         timezone: manualRegion ? region.timezone : undefined,
@@ -430,10 +447,15 @@ export function FingerprintPanel({ value, onChange, profileId, proxyId, proxyCon
             <Select value={quickPlatform} onChange={e => setQuickPlatform(e.target.value)} options={PLATFORM_OPTIONS.filter(option => option.value)} />
           </FormItem>
           <FormItem label="地区模式">
-            <Select value={regionMode} onChange={e => setRegionMode(e.target.value as 'manual' | 'proxy' | 'system')} options={REGION_MODE_OPTIONS} />
+            <Select
+              value={effectiveRegionMode}
+              onChange={e => setRegionMode(e.target.value as 'manual' | 'proxy' | 'system')}
+              options={REGION_MODE_OPTIONS}
+              disabled={proxyRegionLocked}
+            />
           </FormItem>
           <FormItem label="地区">
-            <Select value={quickCountry} onChange={e => setQuickCountry(e.target.value)} options={COUNTRY_OPTIONS} disabled={regionMode === 'system'} />
+            <Select value={quickCountry} onChange={e => setQuickCountry(e.target.value)} options={COUNTRY_OPTIONS} disabled={effectiveRegionMode !== 'manual'} />
           </FormItem>
           <FormItem label="设备类型">
             <Select value={quickDevice} onChange={e => setQuickDevice(e.target.value)} options={DEVICE_CLASS_OPTIONS} />

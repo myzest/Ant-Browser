@@ -206,11 +206,14 @@ func (a *App) persistProxyIPHealthResult(result ProxyIPHealthResult) {
 			if strings.TrimSpace(result.Timezone) != "" && (!result.timezoneFromRegionDefault || strings.TrimSpace(proxyItem.Timezone) == "") {
 				proxyItem.Timezone = strings.TrimSpace(result.Timezone)
 			}
-			locale, timezone, _ := fingerprint.RegionDefaults(proxyItem.Country, proxyItem.Locale, proxyItem.Timezone)
-			if strings.TrimSpace(proxyItem.Locale) == "" {
+			locale, timezone, country := fingerprint.ProxyRegionDefaults(proxyItem.Country, proxyItem.Locale, proxyItem.Timezone)
+			if strings.TrimSpace(country) != "" {
+				proxyItem.Country = country
+			}
+			if strings.TrimSpace(locale) != "" {
 				proxyItem.Locale = locale
 			}
-			if strings.TrimSpace(proxyItem.Timezone) == "" {
+			if strings.TrimSpace(timezone) != "" {
 				proxyItem.Timezone = timezone
 			}
 			_ = a.browserMgr.ProxyDAO.Upsert(proxyItem)
@@ -223,16 +226,23 @@ func proxyIPHealthResultWithRegionDefaults(result ProxyIPHealthResult) ProxyIPHe
 	if !result.Ok || strings.TrimSpace(result.Country) == "" {
 		return result
 	}
-	locale, timezone, _ := fingerprint.RegionDefaults(result.Country, result.Locale, result.Timezone)
-	if strings.TrimSpace(result.Locale) == "" && strings.TrimSpace(locale) != "" {
-		result.Locale = strings.TrimSpace(locale)
-		result.localeFromRegionDefault = true
-		setRawStringIfEmpty(result.RawData, "locale", result.Locale)
+	originalCountry := strings.TrimSpace(result.Country)
+	originalLocale := strings.TrimSpace(result.Locale)
+	originalTimezone := strings.TrimSpace(result.Timezone)
+	locale, timezone, country := fingerprint.ProxyRegionDefaults(originalCountry, originalLocale, originalTimezone)
+	if strings.TrimSpace(country) != "" {
+		result.Country = strings.TrimSpace(country)
+		setRawString(result.RawData, "country", result.Country)
 	}
-	if strings.TrimSpace(result.Timezone) == "" && strings.TrimSpace(timezone) != "" {
+	if strings.TrimSpace(locale) != "" {
+		result.Locale = strings.TrimSpace(locale)
+		result.localeFromRegionDefault = originalLocale == "" || !strings.EqualFold(originalLocale, result.Locale)
+		setRawString(result.RawData, "locale", result.Locale)
+	}
+	if strings.TrimSpace(timezone) != "" {
 		result.Timezone = strings.TrimSpace(timezone)
-		result.timezoneFromRegionDefault = true
-		setRawStringIfEmpty(result.RawData, "timezone", result.Timezone)
+		result.timezoneFromRegionDefault = originalTimezone == "" || !strings.EqualFold(originalTimezone, result.Timezone)
+		setRawString(result.RawData, "timezone", result.Timezone)
 	}
 	return result
 }
@@ -294,6 +304,13 @@ func mapString(data map[string]interface{}, key string) string {
 	default:
 		return fmt.Sprint(value)
 	}
+}
+
+func setRawString(data map[string]interface{}, key string, value string) {
+	if data == nil || strings.TrimSpace(key) == "" || strings.TrimSpace(value) == "" {
+		return
+	}
+	data[key] = strings.TrimSpace(value)
 }
 
 func setRawStringIfEmpty(data map[string]interface{}, key string, value string) {
