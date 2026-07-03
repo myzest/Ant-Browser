@@ -36,6 +36,14 @@ logging:
             - password
             - token
             - secret
+geoip:
+    enabled: false
+    provider: maxmind
+    edition_id: GeoLite2-City
+    cache_dir: data/geoip
+    auto_update: true
+    max_age_days: 30
+    timeout_ms: 15000
 browser:
     user_data_root: data
     default_fingerprint_args:

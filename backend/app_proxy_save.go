@@ -90,7 +90,7 @@ func (a *App) SaveBrowserProxies(proxies []BrowserProxy) error {
 		}
 		for _, item := range normalized {
 			if err := a.browserMgr.ProxyDAO.Upsert(item); err != nil {
-				log.Error("代理保存失败", logger.F("proxy_id", item.ProxyId), logger.F("error", err))
+				log.Error("代理保存失败", logger.F("proxy_id", item.ProxyId), logger.F("error", err.Error()))
 				return err
 			}
 		}

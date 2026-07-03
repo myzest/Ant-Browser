@@ -61,6 +61,25 @@ import { ProxyPoolHeader } from './proxyPool/ProxyPoolHeader'
 import { ProxyPoolTableCard } from './proxyPool/ProxyPoolTableCard'
 
 export function ProxyPoolPage() {
+  const errorMessage = (error: unknown, fallback: string): string => {
+    if (error instanceof Error && error.message) return error.message
+    if (typeof error === 'string' && error.trim()) return error.trim()
+    if (error && typeof error === 'object') {
+      const record = error as Record<string, unknown>
+      for (const key of ['message', 'error', 'detail']) {
+        const value = record[key]
+        if (typeof value === 'string' && value.trim()) return value.trim()
+      }
+      try {
+        const text = JSON.stringify(error)
+        if (text && text !== '{}') return text
+      } catch {
+        // ignore stringify failures and use fallback
+      }
+    }
+    return fallback
+  }
+
   const createInitialChainImportForm = (): ChainImportForm => ({
     ...INITIAL_CHAIN_IMPORT_FORM,
     first: { ...INITIAL_CHAIN_IMPORT_FORM.first },
@@ -1047,7 +1066,7 @@ export function ProxyPoolPage() {
       setRemovedPreviewProxyNames([])
       toast.success(`成功导入 ${newProxies.length} 个代理`)
     } catch (error: any) {
-      toast.error(error?.message || '导入失败')
+      toast.error(errorMessage(error, '导入失败'))
     } finally {
       setImporting(false)
     }

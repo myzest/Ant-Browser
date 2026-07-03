@@ -3,6 +3,8 @@ package browser
 import (
 	"database/sql"
 	"fmt"
+	"strings"
+	"sync"
 	"time"
 )
 
@@ -20,7 +22,9 @@ type ProxyDAO interface {
 
 // SQLiteProxyDAO 基于 SQLite 的 ProxyDAO 实现
 type SQLiteProxyDAO struct {
-	db *sql.DB
+	db       *sql.DB
+	ensureMu sync.Mutex
+	ensured  bool
 }
 
 // NewSQLiteProxyDAO 创建 SQLiteProxyDAO
@@ -30,6 +34,9 @@ func NewSQLiteProxyDAO(db *sql.DB) *SQLiteProxyDAO {
 
 // List 查询所有代理，按 sort_order 升序
 func (d *SQLiteProxyDAO) List() ([]Proxy, error) {
+	if err := d.ensureSchema(); err != nil {
+		return nil, err
+	}
 	rows, err := d.db.Query(`
 		SELECT proxy_id, proxy_name, proxy_config, dns_servers,
 		       COALESCE(country, ''), COALESCE(region, ''), COALESCE(city, ''), COALESCE(timezone, ''), COALESCE(locale, ''),
@@ -49,6 +56,9 @@ func (d *SQLiteProxyDAO) List() ([]Proxy, error) {
 
 // ListByGroup 按分组名称查询代理
 func (d *SQLiteProxyDAO) ListByGroup(groupName string) ([]Proxy, error) {
+	if err := d.ensureSchema(); err != nil {
+		return nil, err
+	}
 	rows, err := d.db.Query(`
 		SELECT proxy_id, proxy_name, proxy_config, dns_servers,
 		       COALESCE(country, ''), COALESCE(region, ''), COALESCE(city, ''), COALESCE(timezone, ''), COALESCE(locale, ''),
@@ -69,6 +79,9 @@ func (d *SQLiteProxyDAO) ListByGroup(groupName string) ([]Proxy, error) {
 
 // ListGroups 获取所有非空分组名称（去重）
 func (d *SQLiteProxyDAO) ListGroups() ([]string, error) {
+	if err := d.ensureSchema(); err != nil {
+		return nil, err
+	}
 	rows, err := d.db.Query(`
 		SELECT DISTINCT group_name FROM browser_proxies
 		WHERE group_name != '' ORDER BY group_name ASC`)
@@ -90,6 +103,9 @@ func (d *SQLiteProxyDAO) ListGroups() ([]string, error) {
 
 // Upsert 新增或更新代理
 func (d *SQLiteProxyDAO) Upsert(proxy Proxy) error {
+	if err := d.ensureSchema(); err != nil {
+		return err
+	}
 	now := time.Now().Format(time.RFC3339)
 	autoRefreshInt := 0
 	if proxy.SourceAutoRefresh {
@@ -132,6 +148,9 @@ func (d *SQLiteProxyDAO) Upsert(proxy Proxy) error {
 
 // Delete 删除单个代理
 func (d *SQLiteProxyDAO) Delete(proxyId string) error {
+	if err := d.ensureSchema(); err != nil {
+		return err
+	}
 	_, err := d.db.Exec(`DELETE FROM browser_proxies WHERE proxy_id = ?`, proxyId)
 	if err != nil {
 		return fmt.Errorf("删除代理失败: %w", err)
@@ -141,6 +160,9 @@ func (d *SQLiteProxyDAO) Delete(proxyId string) error {
 
 // DeleteAll 清空代理表（批量保存前使用）
 func (d *SQLiteProxyDAO) DeleteAll() error {
+	if err := d.ensureSchema(); err != nil {
+		return err
+	}
 	_, err := d.db.Exec(`DELETE FROM browser_proxies`)
 	if err != nil {
 		return fmt.Errorf("清空代理表失败: %w", err)
@@ -150,6 +172,9 @@ func (d *SQLiteProxyDAO) DeleteAll() error {
 
 // UpdateSpeedResult 更新单个代理的测速结果
 func (d *SQLiteProxyDAO) UpdateSpeedResult(proxyId string, ok bool, latencyMs int64, testedAt string) error {
+	if err := d.ensureSchema(); err != nil {
+		return err
+	}
 	okInt := 0
 	if ok {
 		okInt = 1
@@ -165,12 +190,83 @@ func (d *SQLiteProxyDAO) UpdateSpeedResult(proxyId string, ok bool, latencyMs in
 
 // UpdateIPHealthResult 更新单个代理的 IP 健康检测结果（JSON 字符串）
 func (d *SQLiteProxyDAO) UpdateIPHealthResult(proxyId string, healthJSON string) error {
+	if err := d.ensureSchema(); err != nil {
+		return err
+	}
 	_, err := d.db.Exec(`
 		UPDATE browser_proxies SET last_ip_health_json=?
 		WHERE proxy_id=?`, healthJSON, proxyId)
 	if err != nil {
 		return fmt.Errorf("更新 IP 健康结果失败: %w", err)
 	}
+	return nil
+}
+
+type proxyColumnMigration struct {
+	name       string
+	definition string
+}
+
+var proxyOptionalColumns = []proxyColumnMigration{
+	{name: "group_name", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "last_latency_ms", definition: "INTEGER NOT NULL DEFAULT -1"},
+	{name: "last_test_ok", definition: "INTEGER NOT NULL DEFAULT 0"},
+	{name: "last_tested_at", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "last_ip_health_json", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "source_id", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "source_url", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "source_name_prefix", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "source_auto_refresh", definition: "INTEGER NOT NULL DEFAULT 0"},
+	{name: "source_refresh_interval_m", definition: "INTEGER NOT NULL DEFAULT 0"},
+	{name: "source_last_refresh_at", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "country", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "region", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "city", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "timezone", definition: "TEXT NOT NULL DEFAULT ''"},
+	{name: "locale", definition: "TEXT NOT NULL DEFAULT ''"},
+}
+
+func (d *SQLiteProxyDAO) ensureSchema() error {
+	if d == nil || d.db == nil {
+		return fmt.Errorf("代理数据库未初始化")
+	}
+	d.ensureMu.Lock()
+	defer d.ensureMu.Unlock()
+	if d.ensured {
+		return nil
+	}
+
+	existing := map[string]bool{}
+	rows, err := d.db.Query(`PRAGMA table_info(browser_proxies)`)
+	if err != nil {
+		return fmt.Errorf("读取代理表结构失败: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name string
+		var columnType string
+		var notNull int
+		var defaultValue interface{}
+		var pk int
+		if err := rows.Scan(&cid, &name, &columnType, &notNull, &defaultValue, &pk); err != nil {
+			return fmt.Errorf("解析代理表结构失败: %w", err)
+		}
+		existing[strings.ToLower(strings.TrimSpace(name))] = true
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("读取代理表结构失败: %w", err)
+	}
+
+	for _, column := range proxyOptionalColumns {
+		if existing[strings.ToLower(column.name)] {
+			continue
+		}
+		if _, err := d.db.Exec(fmt.Sprintf(`ALTER TABLE browser_proxies ADD COLUMN %s %s`, column.name, column.definition)); err != nil {
+			return fmt.Errorf("补齐代理表字段 %s 失败: %w", column.name, err)
+		}
+	}
+	d.ensured = true
 	return nil
 }
 

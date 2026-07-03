@@ -13,11 +13,13 @@ WAILS_VERSION="${WAILS_VERSION:-v2.12.0}"
 usage() {
   cat <<'USAGE'
 Usage:
-  ./dev-build.sh [stable|live|build|help]
+  ./dev-build.sh [check|stable|live|build|help]
 
 Modes:
   stable  Install deps, build frontend, then start Wails with frontend/dist. Default.
   live    Install deps, start Vite dev server, then start Wails connected to Vite.
+  check   Install deps, build frontend, run Go checks, verify runtime files.
+          This mode does not start Wails or compile the dev application.
   build   Install deps and build frontend only.
   help    Show this help.
 
@@ -28,6 +30,8 @@ Optional env:
   WAILS_VERSION           Wails CLI version, default v2.12.0
   WAILS_DEVSERVER_PORT    Wails internal dev server start port, default 34115
   FRONTEND_PORT           Vite port for live mode, default 5218
+  XRAY_BINARY_PATH        Optional xray binary override; defaults to bin/<os>-<arch>/xray
+  SINGBOX_BINARY_PATH     Optional sing-box binary override; defaults to bin/<os>-<arch>/sing-box
 USAGE
 }
 
@@ -103,6 +107,55 @@ resolve_wails_devserver() {
   export WAILS_DEVSERVER_ADDRESS="$WAILS_DEVSERVER_HOST:$port"
 }
 
+prepare_proxy_runtime_env() {
+  local os_name arch_name target_dir xray_path singbox_path
+  export ANT_BROWSER_APP_ROOT="${ANT_BROWSER_APP_ROOT:-$ROOT_DIR}"
+
+  case "$(uname -s)" in
+    Darwin) os_name="darwin" ;;
+    Linux) os_name="linux" ;;
+    MINGW*|MSYS*|CYGWIN*) os_name="windows" ;;
+    *)
+      warn "Unsupported runtime OS for proxy helper auto-detect: $(uname -s)"
+      return
+      ;;
+  esac
+
+  case "$(uname -m)" in
+    arm64|aarch64) arch_name="arm64" ;;
+    x86_64|amd64) arch_name="amd64" ;;
+    *)
+      warn "Unsupported runtime arch for proxy helper auto-detect: $(uname -m)"
+      return
+      ;;
+  esac
+
+  target_dir="$ROOT_DIR/bin/$os_name-$arch_name"
+  if [[ "$os_name" == "windows" ]]; then
+    xray_path="$ROOT_DIR/bin/xray.exe"
+    singbox_path="$ROOT_DIR/bin/sing-box.exe"
+  else
+    xray_path="$target_dir/xray"
+    singbox_path="$target_dir/sing-box"
+  fi
+
+  if [[ -z "${XRAY_BINARY_PATH:-}" && -f "$xray_path" ]]; then
+    chmod +x "$xray_path" 2>/dev/null || true
+    export XRAY_BINARY_PATH="$xray_path"
+    log "Using xray runtime: $XRAY_BINARY_PATH"
+  elif [[ -z "${XRAY_BINARY_PATH:-}" ]]; then
+    warn "xray runtime not found at $xray_path; chain proxy / bridge checks may fail"
+  fi
+
+  if [[ -z "${SINGBOX_BINARY_PATH:-}" && -f "$singbox_path" ]]; then
+    chmod +x "$singbox_path" 2>/dev/null || true
+    export SINGBOX_BINARY_PATH="$singbox_path"
+    log "Using sing-box runtime: $SINGBOX_BINARY_PATH"
+  elif [[ -z "${SINGBOX_BINARY_PATH:-}" ]]; then
+    warn "sing-box runtime not found at $singbox_path; sing-box proxy checks may fail"
+  fi
+}
+
 install_frontend_deps() {
   cd "$FRONTEND_DIR"
   if [[ -f package-lock.json ]]; then
@@ -127,8 +180,33 @@ prepare() {
   setup_proxy_env
   ensure_wails
   resolve_wails_devserver
+  prepare_proxy_runtime_env
   log "Root: $ROOT_DIR"
   log "Wails dev server: http://$WAILS_DEVSERVER_ADDRESS"
+}
+
+prepare_check() {
+  require_cmd node
+  require_cmd npm
+  require_cmd go
+  setup_proxy_env
+  prepare_proxy_runtime_env
+  log "Root: $ROOT_DIR"
+}
+
+verify_proxy_runtime_files() {
+  local failed=0
+  if [[ -z "${XRAY_BINARY_PATH:-}" || ! -x "${XRAY_BINARY_PATH:-}" ]]; then
+    err "xray runtime is missing or not executable: ${XRAY_BINARY_PATH:-<unset>}"
+    failed=1
+  fi
+  if [[ -z "${SINGBOX_BINARY_PATH:-}" || ! -x "${SINGBOX_BINARY_PATH:-}" ]]; then
+    err "sing-box runtime is missing or not executable: ${SINGBOX_BINARY_PATH:-<unset>}"
+    failed=1
+  fi
+  if [[ "$failed" -ne 0 ]]; then
+    exit 1
+  fi
 }
 
 run_stable() {
@@ -137,6 +215,7 @@ run_stable() {
   build_frontend
   cd "$ROOT_DIR"
   log "Starting Wails in stable mode ..."
+  log "Wails may print 'Compiling application' next; this is normal startup progress, no input is required."
   exec wails dev -m -noreload -s -skipbindings -assetdir frontend/dist -devserver "$WAILS_DEVSERVER_ADDRESS"
 }
 
@@ -154,6 +233,7 @@ run_live() {
 
   cd "$ROOT_DIR"
   log "Starting Wails in live mode ..."
+  log "Wails may print 'Compiling application' next; this is normal startup progress, no input is required."
   exec wails dev -m -s -skipbindings -frontenddevserverurl "http://127.0.0.1:$FRONTEND_PORT" -viteservertimeout 60 -devserver "$WAILS_DEVSERVER_ADDRESS"
 }
 
@@ -164,7 +244,25 @@ run_build_only() {
   log "Build complete: $FRONTEND_DIR/dist"
 }
 
+run_check() {
+  prepare_check
+  install_frontend_deps
+  build_frontend
+
+  cd "$ROOT_DIR"
+  verify_proxy_runtime_files
+
+  log "Running focused Go checks ..."
+  go test ./backend/internal/browser ./backend/internal/proxy ./backend -run 'ProxyDAO|ProxyConfig|TestChain|TestBrowserProxy|TestProxy|Test.*Xray'
+
+  log "Checking diff whitespace ..."
+  git diff --check
+
+  log "Pre-upload check complete. No Wails dev app was started. Use ./dev-build.sh to open the local development panel."
+}
+
 case "$MODE" in
+  check) run_check ;;
   stable) run_stable ;;
   live) run_live ;;
   build) run_build_only ;;

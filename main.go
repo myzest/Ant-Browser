@@ -76,6 +76,53 @@ func NewApp(appRoot, version string) *App {
 	return &App{App: backend.NewApp(appRoot, version)}
 }
 
+func looksLikeRepoRoot(root string) bool {
+	if strings.TrimSpace(root) == "" {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(root, "wails.json")); err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(root, "frontend")); err != nil {
+		return false
+	}
+	if _, err := os.Stat(filepath.Join(root, "backend")); err != nil {
+		return false
+	}
+	return true
+}
+
+func resolveDevRootFromEnv() (string, bool) {
+	root := strings.TrimSpace(os.Getenv("ANT_BROWSER_APP_ROOT"))
+	if root == "" {
+		return "", false
+	}
+	if abs, err := filepath.Abs(root); err == nil {
+		root = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(root); err == nil {
+		root = resolved
+	}
+	return root, looksLikeRepoRoot(root)
+}
+
+func resolveDevRootFromCWD() (string, bool) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", false
+	}
+	if resolved, err := filepath.EvalSymlinks(cwd); err == nil {
+		cwd = resolved
+	}
+	return cwd, looksLikeRepoRoot(cwd)
+}
+
+func isWailsDevAppBundle(exeDir string) bool {
+	slash := filepath.ToSlash(strings.ToLower(strings.TrimSpace(exeDir)))
+	return strings.HasSuffix(slash, "/build/bin/ant browser.app/contents/macos") ||
+		strings.HasSuffix(slash, "/build/bin/ant-chrome.app/contents/macos")
+}
+
 func (a *App) startup(ctx context.Context) {
 	backend.Start(a.App, ctx)
 }
@@ -92,7 +139,10 @@ func main() {
 	// 确定应用根目录：
 	// 1. 生产环境：exe 所在目录（快捷方式启动时 CWD 可能不对，需要修正）
 	// 2. dev 环境：wails dev 时 exe 可能在 temp 目录或 build/bin 目录，使用当前工作目录
-	if exePath, err := os.Executable(); err == nil {
+	if envRoot, ok := resolveDevRootFromEnv(); ok {
+		isDevMode = true
+		appRoot = envRoot
+	} else if exePath, err := os.Executable(); err == nil {
 		exeDir := filepath.Dir(exePath)
 		tempDir := os.TempDir()
 		if resolved, err := filepath.EvalSymlinks(exeDir); err == nil {
@@ -106,11 +156,12 @@ func main() {
 		inTemp := strings.HasPrefix(exeDirLower, strings.ToLower(tempDir))
 		// wails dev 会把 exe 编译到 build/bin/ 目录
 		inBuildBin := strings.HasSuffix(filepath.ToSlash(exeDirLower), "/build/bin")
+		inDevAppBundle := isWailsDevAppBundle(exeDir)
 
-		if inTemp || inBuildBin {
-			// dev 模式：exe 在临时目录或 build/bin，使用 CWD 作为根目录
+		if inTemp || inBuildBin || inDevAppBundle {
+			// dev 模式：exe 在临时目录、build/bin 或 build/bin/*.app 内，使用 CWD 作为根目录
 			isDevMode = true
-			if cwd, err := os.Getwd(); err == nil {
+			if cwd, ok := resolveDevRootFromCWD(); ok {
 				appRoot = cwd
 			} else {
 				appRoot = "."
