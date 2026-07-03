@@ -675,6 +675,22 @@ func TestMergeLaunchArgsCanonicalizesAcceptLanguageAlias(t *testing.T) {
 	}
 }
 
+func TestMergeLaunchArgsDeduplicatesWindowPosition(t *testing.T) {
+	t.Parallel()
+
+	got := mergeLaunchArgs(
+		[]string{"--window-position=0,0", "--window-size=1280,800"},
+		[]string{"--window-position", "100,120"},
+	)
+	want := []string{
+		"--window-position=100,120",
+		"--window-size=1280,800",
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("mergeLaunchArgs window-position mismatch:\n got=%v\nwant=%v", got, want)
+	}
+}
+
 func TestBuildBrowserLaunchArgsOmitsDebugPortForManualStart(t *testing.T) {
 	t.Parallel()
 
@@ -949,6 +965,62 @@ func TestCollectLaunchRuntimeWarningsDetectsBooleanFlags(t *testing.T) {
 	}
 	if !strings.Contains(joined, "禁用 GPU") {
 		t.Fatalf("expected disable-gpu warning for boolean flag, got=%v", warnings)
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsDetectsViewportWindowMismatch(t *testing.T) {
+	t.Parallel()
+
+	warnings := collectLaunchRuntimeWarnings("profile-viewport", []string{
+		"--window-size=1920,1080",
+		"--fingerprint-screen-avail=1280,720",
+	})
+
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "窗口尺寸") || !strings.Contains(joined, "可用屏幕区域") {
+		t.Fatalf("expected viewport/window mismatch warning, got=%v", warnings)
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsAllowsDefaultChromeHeightGap(t *testing.T) {
+	t.Parallel()
+
+	warnings := collectLaunchRuntimeWarnings("profile-viewport-default", []string{
+		"--window-size=1920,1080",
+		"--fingerprint-screen-avail=1920,1040",
+	})
+
+	for _, warning := range warnings {
+		if strings.Contains(warning, "窗口尺寸与可用屏幕区域不一致") {
+			t.Fatalf("did not expect default chrome height gap warning: %v", warnings)
+		}
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsDetectsInvalidViewportPairs(t *testing.T) {
+	t.Parallel()
+
+	warnings := collectLaunchRuntimeWarnings("profile-viewport-invalid", []string{
+		"--window-size=wide,tall",
+		"--fingerprint-screen-avail=1920",
+	})
+
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "window-size 格式异常") || !strings.Contains(joined, "fingerprint-screen-avail 格式异常") {
+		t.Fatalf("expected invalid viewport pair warnings, got=%v", warnings)
+	}
+}
+
+func TestCollectLaunchRuntimeWarningsDetectsSmallWindowWithoutScreenAvail(t *testing.T) {
+	t.Parallel()
+
+	warnings := collectLaunchRuntimeWarnings("profile-viewport-small", []string{
+		"--window-size=640,480",
+	})
+
+	joined := strings.Join(warnings, "\n")
+	if !strings.Contains(joined, "窗口尺寸过小") {
+		t.Fatalf("expected small window warning without screen-avail, got=%v", warnings)
 	}
 }
 

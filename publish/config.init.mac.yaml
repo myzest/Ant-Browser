@@ -53,8 +53,8 @@ browser:
     - --fingerprint-brand=Chrome
     - --fingerprint-platform=mac
     - --lang=zh-CN
-    - --fingerprint-accept-language=zh-CN,zh;q=0.9
     - --fingerprint-locale=zh-CN
+    - --fingerprint-accept-language=zh-CN,zh;q=0.9
     - --timezone=Asia/Shanghai
     - --fingerprint-timezone=Asia/Shanghai
     - --window-size=1440,900
@@ -66,8 +66,8 @@ browser:
     - --fingerprint-canvas-noise=true
     - --fingerprint-audio-noise=true
     - --fingerprint-webgl-vendor=Apple
-    - --fingerprint-webgl-renderer=Apple M1
-    - --fingerprint-fonts=Arial,Helvetica,PingFang SC,Hiragino Sans GB,STHeiti,Times New Roman
+    - --fingerprint-webgl-renderer=Apple GPU
+    - --fingerprint-fonts=Helvetica Neue,PingFang SC,Menlo,Monaco,Times New Roman,Apple Color Emoji,Helvetica
     - --webrtc-ip-handling-policy=disable_non_proxied_udp
     - --fingerprint-webrtc-ip=auto
     - --fingerprint-do-not-track=false

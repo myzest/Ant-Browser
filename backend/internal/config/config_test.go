@@ -4,6 +4,7 @@ import (
 	"ant-chrome/backend/internal/fingerprint"
 	"os"
 	"path/filepath"
+	"reflect"
 	"runtime"
 	"strings"
 	"testing"
@@ -199,6 +200,38 @@ func TestDefaultConfigUsesCurrentOSFingerprintPlatform(t *testing.T) {
 		if cfg.Browser.DefaultFingerprintArgs[i] != want[i] {
 			t.Fatalf("默认指纹参数不符: got=%v want=%v", cfg.Browser.DefaultFingerprintArgs, want)
 		}
+	}
+}
+
+func TestRepositoryConfigTemplatesUseGeneratedFingerprintDefaults(t *testing.T) {
+	t.Parallel()
+
+	repoRoot := filepath.Clean(filepath.Join("..", "..", ".."))
+	tests := []struct {
+		name string
+		path string
+		goos string
+	}{
+		{name: "root windows template", path: filepath.Join(repoRoot, "config.yaml"), goos: "windows"},
+		{name: "publish windows template", path: filepath.Join(repoRoot, "publish", "config.init.yaml"), goos: "windows"},
+		{name: "publish mac template", path: filepath.Join(repoRoot, "publish", "config.init.mac.yaml"), goos: "darwin"},
+		{name: "publish linux template", path: filepath.Join(repoRoot, "publish", "config.init.linux.yaml"), goos: "linux"},
+	}
+
+	for _, tt := range tests {
+		tt := tt
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg, err := Load(tt.path)
+			if err != nil {
+				t.Fatalf("加载配置模板失败: %v", err)
+			}
+			want := fingerprint.DefaultArgsForOS(tt.goos)
+			if !reflect.DeepEqual(cfg.Browser.DefaultFingerprintArgs, want) {
+				t.Fatalf("默认指纹参数模板与生成器不一致:\n got=%v\nwant=%v", cfg.Browser.DefaultFingerprintArgs, want)
+			}
+		})
 	}
 }
 

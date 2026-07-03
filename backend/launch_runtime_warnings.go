@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -16,6 +17,7 @@ func collectLaunchRuntimeWarnings(profileID string, args []string) []string {
 	_ = profileID
 	warnings := []string{}
 	warnings = append(warnings, launchContextDisciplineWarnings(args)...)
+	warnings = append(warnings, launchViewportRuntimeWarnings(args)...)
 	warnings = append(warnings, launchHostPlatformRuntimeWarnings(args)...)
 	warnings = append(warnings, launchWebGLRuntimeWarnings(args)...)
 	warnings = append(warnings, launchFontRuntimeWarnings(args)...)
@@ -42,6 +44,34 @@ func launchContextDisciplineWarnings(args []string) []string {
 	}
 	if strings.Contains(strings.ToLower(values["--use-gl"]), "swiftshader") || strings.Contains(strings.ToLower(values["--use-angle"]), "swiftshader") {
 		warnings = append(warnings, "检测到 SwiftShader 渲染路径；请确认 WebGL/WebGPU renderer 与平台身份一致。")
+	}
+	return warnings
+}
+
+func launchViewportRuntimeWarnings(args []string) []string {
+	values := parseLaunchArgValues(args)
+	windowSize := strings.TrimSpace(values["--window-size"])
+	screenAvail := strings.TrimSpace(values["--fingerprint-screen-avail"])
+	if windowSize == "" && screenAvail == "" {
+		return nil
+	}
+
+	warnings := []string{}
+	windowWidth, windowHeight, hasWindow := parseRuntimeWarningPair(windowSize)
+	availWidth, availHeight, hasAvail := parseRuntimeWarningPair(screenAvail)
+	if windowSize != "" && !hasWindow {
+		warnings = append(warnings, "检测到 window-size 格式异常；请使用 宽,高，并确认 screen/avail/inner/outer 几何一致。")
+	}
+	if screenAvail != "" && !hasAvail {
+		warnings = append(warnings, "检测到 fingerprint-screen-avail 格式异常；请使用 宽,高，并确认可用屏幕区域不大于屏幕尺寸。")
+	}
+	if hasWindow && (windowWidth < 800 || windowHeight < 600) {
+		warnings = append(warnings, "检测到窗口尺寸过小；高风控站点可能将异常 viewport/window 组合识别为自动化环境。")
+	}
+	if hasWindow && hasAvail {
+		if windowWidth > availWidth || windowHeight > availHeight+120 {
+			warnings = append(warnings, "检测到窗口尺寸与可用屏幕区域不一致；window-size 不应明显大于 fingerprint-screen-avail，避免 viewport/window 物理矛盾。")
+		}
 	}
 	return warnings
 }
@@ -161,6 +191,23 @@ func parseLaunchArgValues(args []string) map[string]string {
 		values[key] = value
 	}
 	return values
+}
+
+func parseRuntimeWarningPair(value string) (int, int, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, 0, false
+	}
+	left, right, ok := strings.Cut(value, ",")
+	if !ok {
+		return 0, 0, false
+	}
+	width, errW := strconv.Atoi(strings.TrimSpace(left))
+	height, errH := strconv.Atoi(strings.TrimSpace(right))
+	if errW != nil || errH != nil || width <= 0 || height <= 0 {
+		return 0, 0, false
+	}
+	return width, height, true
 }
 
 func normalizeRuntimeWarningPlatform(value string) string {

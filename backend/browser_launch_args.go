@@ -44,6 +44,7 @@ var singleValueLaunchArgPrefixes = []string{
 	"--fingerprint-webrtc-ip",
 	"--lang",
 	"--timezone",
+	"--window-position",
 	"--webrtc-ip-handling-policy",
 	"--window-size",
 }
